@@ -70,7 +70,7 @@
   function img(base, path) {
     if (base === null || base === undefined) return null;
     var key = base + path, e = IMG[key];
-    if (!e) { e = IMG[key] = { el: new Image(), ok: false }; e.el.onload = function () { e.ok = true; }; e.el.src = key; }
+    if (!e) { e = IMG[key] = { el: new Image(), ok: false, warm: false }; e.el.onload = function () { var done = function () { e.ok = true; }; if (e.el.decode) e.el.decode().then(done, done); else done(); }; e.el.src = key; }
     return e.ok ? e.el : null;
   }
   var GLOW = {};
@@ -232,16 +232,17 @@
     this.def = def; this.opts = opts || {};
     this.canvas = this.opts.canvas;
     if (!this.canvas) throw new Error('TacoFlight: opts.canvas required');
-    this.ctx = this.canvas.getContext('2d');
+    this.ctx = this.canvas.getContext('2d', { alpha: false });   // opaque: every frame paints the full playfield (if the engine already made a context, this returns that one)
     this.T = readTune(); this.P = W.TacoPhysics || {};
     this.artBase = this.opts.artBase === undefined ? 'art/' : this.opts.artBase;
     this.pilotKey = this.opts.pilot || def.defaultPilot || 'taco';
     this.pilot = PILOTS[this.pilotKey] || { name: String(this.pilotKey).toUpperCase(), call: String(this.pilotKey).toUpperCase(), color: '#fff' };
     this.god = !!this.opts.god;
-    this.rs = 1; this.ftEma = 16.7; this.slowT = 0; this.adaptive = this.opts.adaptive !== false;
+    this.rs = 1; this.fxTier = 0; this.ftEma = 16.7; this.slowT = 0; this.adaptive = this.opts.adaptive !== false;
     this.perf = { upd: 0, draw: 0 }; this.spr = {}; this.bake = {};
     this.input = new FlightInput(this);
     this.resize(); this.reset();
+    this.preload();
   }
   var F = Flight.prototype;
 
@@ -256,14 +257,15 @@
     this.spd = clamp(this.vw / 900, 0.62, 1.25);
     this.hudH = 64 / this.scale;
     this.bake = {}; // size-dependent caches
-    if (this.ship) { this.ship.x = clamp(this.ship.x, 40, this.vw * 0.72); this.ship.y = clamp(this.ship.y, this.hudH, this.vh - 30); }
+    if (this.ship) { this.ship.x = clamp(this.ship.x, Math.max(40, (this.def.ship.tail || 30) + 12), this.vw * 0.72); this.ship.y = clamp(this.ship.y, this.hudH, this.vh - 30); }
   };
   // run() passes the real frame time; if the device can't keep up, render resolution steps down (never the playfield)
   F.frame = function (ms) {
     if (!(ms > 0 && ms < 250)) return;
     this.ftEma += (ms - this.ftEma) * 0.06;
     if (!this.adaptive) return;
-    if (this.ftEma > 21 && this.rs > 0.56) { this.slowT += ms / 1000; if (this.slowT > 1.5) { this.rs = Math.max(0.55, this.rs - 0.15); this.slowT = 0; this.resize(); } }
+    // step 1: drop purely decorative layers (fxTier 1); step 2+: lower render resolution (never the playfield)
+    if (this.ftEma > 21 && (this.fxTier < 1 || this.rs > 0.56)) { this.slowT += ms / 1000; if (this.slowT > 1) { if (this.fxTier < 1) this.fxTier = 1; else { this.rs = Math.max(0.55, this.rs - (this.ftEma > 32 ? 0.3 : 0.15)); this.resize(); } this.slowT = 0; this.ftEma = 18; } }
     else this.slowT = 0;
   };
 
@@ -289,6 +291,24 @@
     }
   };
 
+  // fetch + decode every art file up front (no pop-in when the first TIE or pickup appears)
+  F.preload = function () {
+    var list = ['space/far.webp', 'space/stars_tile.webp', 'space/planet_gas_giant.webp', 'space/planet_battle_moon.webp', 'space/trench_wall.webp', 'space/ds2_wall.webp',
+      'pickups/heart.webp', 'pickups/salsa.webp', 'pickups/star.webp', 'pickups/taco_shell.webp'];
+    for (var k in SPRITE_FILES) list.push(SPRITE_FILES[k][0]);
+    for (var i = 0; i < list.length; i++) img(this.artBase, list[i]);
+    this.preList = list;
+  };
+  // during intro/resume cards, touch each decoded image once (tiny, near-invisible) so the GPU upload happens before play
+  F.warmArt = function (c) {
+    if (!this.preList || this.artBase === null || this.artBase === undefined) return;
+    var n = 0;
+    if (!this.warmBlend) { this.warmBlend = true; c.globalAlpha = 0.01; c.globalCompositeOperation = 'lighter'; c.drawImage(glow('#ffffff'), 0, 0, 2, 2); c.globalCompositeOperation = 'source-over'; c.globalAlpha = 1; }
+    for (var i = 0; i < this.preList.length && n < 3; i++) {
+      var e = IMG[this.artBase + this.preList[i]]; if (!e || !e.ok || e.warm) continue;
+      e.warm = true; n++; c.globalAlpha = 0.01; c.drawImage(e.el, 0, 0, 2, 2); c.globalAlpha = 1;
+    }
+  };
   F.sfx = function (n) {
     var o = this.opts;
     if (o.sfx) { try { o.sfx(n); } catch (e) {} return; }
@@ -354,7 +374,8 @@
       var en = this.mkEnemy(e.wave, this.vw + 40 + xo, yf + off);
       en.pattern = e.pattern || 'straight';
       if (e.pattern === 'sine') en.ph = i * 0.9;
-      if (e.from === 'behind') { en.x = -60 - i * 70; en.vx = Math.abs(en.vx) * 1.1; en.behind = true; en.fireT += 1; }
+      if (e.from === 'behind') { en.vx = Math.abs(en.vx) * 1.1; en.x = -60 - en.vx * 0.8 - i * 70;   // ~0.8 s of edge warning first
+        en.behind = true; en.fireT += 1; }
       this.en.push(en);
     }
   };
@@ -505,7 +526,7 @@
   F.botInput = function (tx, ty, fire) { this.bot = { tx: tx, ty: ty, fire: !!fire }; };
   F.updShip = function (dt, host) {
     var s = this.ship, T = this.T, I = this.input, inp = { L: !!host.L, R: !!host.R, U: !!host.U, D: !!host.D, hasTarget: false };
-    var minX = 40, maxX = this.boss && !this.boss.entering ? Math.min(this.vw * 0.72, this.boss.x - this.boss.r - s.r - 30) : this.vw * 0.72, minY = this.hudH + s.r * 0.6, maxY = this.vh - s.r - 6;
+    var minX = Math.max(40, (this.def.ship.tail || 30) + 12), maxX = this.boss && !this.boss.entering ? Math.min(this.vw * 0.72, this.boss.x - this.boss.r - s.r - 30) : this.vw * 0.72, minY = this.hudH + s.r * 0.6, maxY = this.vh - s.r - 6;
     if (this.bot) { // scripted QA player: drives the same virtual-finger path as a real touch
       if (!I.active) { I.active = true; I.began = true; I.sx = I.cx = 0; I.sy = I.cy = 0; I.isBot = true; }
       else if (this.anchor) { I.cx = (this.bot.tx - this.anchor.x) * this.scale / T.swipeGain; I.cy = (this.bot.ty - this.anchor.y) * this.scale / T.swipeGain; }
@@ -660,7 +681,7 @@
       this.sfx('enemy_laser');
     }
     e.spawnT -= dt;
-    if (e.spawnT <= 0) { e.spawnT = [0, 5, 3.6, 3][ph]; var it = this.mkEnemy('interceptor', -60, Math.random()); it.vx = 380 * this.spd; it.behind = true; this.en.push(it); }
+    if (e.spawnT <= 0) { e.spawnT = [0, 5, 3.6, 3][ph]; var it = this.mkEnemy('interceptor', -60, Math.random()); it.vx = 380 * this.spd; it.x = -60 - it.vx * 0.8; it.behind = true; this.en.push(it); }
   };
   F.muzzleAt = function (x, y, c) { this.addPart('flash', x, y, 0, 0, 0.07, 26, c); };
   F.enemyFire = function (e) {
@@ -849,26 +870,45 @@
     return (this.spr[key] = { src: null, img: cv, w: dw, h: dw * box[1] / box[0], white: whiteOf(cv, cv.width, cv.height) });
   };
   F.getBake = function (key, build) { var b = this.bake[key]; if (b === undefined) b = this.bake[key] = build.call(this) || null; return b; };
-  F.starLayer = function (L) { // code-drawn parallax star layers, baked once per screen size
-    return this.getBake('stars' + L, function () {
-      var k = this.scale * this.dpr, w = Math.ceil(this.vw), h = Math.ceil(this.vh), cv = mkCanvas(w * k, h * k), x = cv.getContext('2d');
-      x.scale(k, k);
-      var n = Math.round(w * h / [2600, 5200, 11000][L]), cols = [['#6f7596', '#8a8fb0'], ['#b9c2ff', '#ffffff'], ['#ffffff', '#ffe9c4']][L];
-      for (var i = 0; i < n; i++) {
-        var sx = hash(i * 3 + L * 7919) * w, sy = hash(i * 5 + 13 + L * 104729) * h, z = [0.9, 1.4, 2.1][L] * (0.6 + hash(i + 77) * 0.8);
-        x.fillStyle = cols[i % 2]; x.globalAlpha = [0.55, 0.8, 1][L];
-        x.fillRect(sx, sy, z, z);
-        if (L === 2 && i % 5 === 0) { x.globalAlpha = 0.45; x.fillRect(sx - z * 2, sy + z / 2 - 0.4, z * 5, 0.8); x.fillRect(sx + z / 2 - 0.4, sy - z * 2, 0.8, z * 5); }
-      }
-      if (L === 0 && !img(this.artBase, 'space/far.webp')) { // code nebula when Teddy's far layer is missing
+  // code-drawn parallax stars. Layer 0 (slowest, dimmest) is baked with the far nebula into one opaque strip;
+  // layers 1-2 are kept as point lists and drawn as batched rects (much cheaper than full-screen blits on software canvas).
+  F.starPts = function (L) {
+    return this.getBake('pts' + L, function () {
+      var w = Math.ceil(this.vw), h = Math.ceil(this.vh), n = Math.round(w * h / [2600, 5200, 11000][L]), out = [[], []];
+      for (var i = 0; i < n; i++) out[i % 2].push(hash(i * 3 + L * 7919) * w, hash(i * 5 + 13 + L * 104729) * h, [0.9, 1.4, 2.1][L] * (0.6 + hash(i + 77) * 0.8));
+      return out;
+    });
+  };
+  var STAR_COL = [['#6f7596', '#8a8fb0'], ['#b9c2ff', '#ffffff'], ['#ffffff', '#ffe9c4']], STAR_A = [0.55, 0.8, 1];
+  F.drawStarPts = function (c, L, off, crosses, dim) {
+    var pts = this.starPts(L), w = Math.ceil(this.vw), al = STAR_A[L] * (dim || 1);
+    c.globalAlpha = al;
+    for (var g = 0; g < 2; g++) {
+      var a = pts[g]; c.fillStyle = STAR_COL[L][g]; c.globalAlpha = al; c.beginPath();
+      for (var i = 0; i < a.length; i += 3) { var x = a[i] + off; if (x < 0) x += w; var z = a[i + 2]; c.rect(x, a[i + 1], z, z); if (crosses && (i / 3) % 5 === 0) { c.rect(x - z * 2, a[i + 1] + z / 2 - 0.4, z * 5, 0.8); c.rect(x + z / 2 - 0.4, a[i + 1] - z * 2, 0.8, z * 5); } }
+      c.fill();
+    }
+    c.globalAlpha = 1;
+  };
+  F.farStrip = function (dark) { // opaque: bg colour + far nebula (Teddy's far.webp or code nebula) + star layer 0 [+ Death Star interior tint]
+    return this.getBake('far' + (dark ? 'D' : ''), function () {
+      var far = img(this.artBase, 'space/far.webp'), vh = this.vh, w = far ? far.width * vh / far.height : this.vw, h = vh;
+      var k = this.scale * this.dpr * (far ? 0.6 : 0.8), cv = mkCanvas(w * k, h * k), x = cv.getContext('2d', { alpha: false });
+      x.scale(k, k); x.fillStyle = this.def.bg === 'yavin' ? '#05030e' : '#07040f'; x.fillRect(0, 0, w + 2, h + 2);
+      if (far) { x.globalAlpha = 0.7; x.drawImage(far, 0, 0, w, h); x.globalAlpha = 1; }
+      else {
         var cl = this.def.bg === 'yavin' ? ['rgba(70,40,140,.16)', 'rgba(20,90,140,.13)', 'rgba(140,40,110,.1)'] : ['rgba(150,40,130,.16)', 'rgba(40,120,120,.12)', 'rgba(90,40,160,.12)'];
         for (var j = 0; j < 5; j++) {
           var gx = hash(j * 31 + 5) * w, gy = hash(j * 17 + 9) * h, gr = (0.25 + hash(j * 7) * 0.35) * Math.max(w, h);
-          var g = x.createRadialGradient(gx, gy, 0, gx, gy, gr); g.addColorStop(0, cl[j % 3]); g.addColorStop(1, 'rgba(0,0,0,0)');
-          x.globalAlpha = 1; x.fillStyle = g; x.fillRect(0, 0, w, h);
+          var gg = x.createRadialGradient(gx, gy, 0, gx, gy, gr); gg.addColorStop(0, cl[j % 3]); gg.addColorStop(1, 'rgba(0,0,0,0)'); x.fillStyle = gg; x.fillRect(0, 0, w, h);
         }
       }
-      return cv;
+      // layer-0 stars tiled across the strip width
+      var pts = this.starPts(0), vw = Math.ceil(this.vw);
+      for (var t0 = 0; t0 < w; t0 += vw) for (var g = 0; g < 2; g++) { x.globalAlpha = STAR_A[0]; x.fillStyle = STAR_COL[0][g]; for (var i = 0; i < pts[g].length; i += 3) if (pts[g][i] + t0 < w) x.fillRect(pts[g][i] + t0, pts[g][i + 1], pts[g][i + 2], pts[g][i + 2]); }
+      x.globalAlpha = 1;
+      if (dark) { x.fillStyle = 'rgba(12,8,18,.82)'; x.fillRect(0, 0, w + 2, h + 2); }
+      return { cv: cv, w: w, art: !!far };
     });
   };
   F.planet = function (key) {
@@ -925,6 +965,12 @@
     for (i = 0; i < this.en.length; i++) this.drawEnemy(c, this.en[i]);
     if (this.cameo) { var q = this.cameo.t / 2.6; this.drawSprite(c, 'falcon', -90 + q * (this.vw + 240), this.hudH + 50 + Math.sin(q * 3) * 30, 0.12, 0); }
     this.drawBolts(c);
+    for (i = 0; i < this.en.length; i++) { // rear-threat warning: pulsing chevron on the left edge while a tail-chaser is still off screen
+      var rb = this.en[i]; if (!rb.behind || rb.x > -rb.r * 0.5) continue;
+      var pa = 0.55 + 0.45 * Math.sin(this.t * 18), ry2 = clamp(rb.y, this.hudH + 20, this.vh - 20);
+      c.globalAlpha = pa; c.fillStyle = '#ff3b3b'; c.beginPath(); c.moveTo(30, ry2); c.lineTo(12, ry2 - 13); c.lineTo(12, ry2 + 13); c.closePath(); c.fill();
+      c.fillStyle = '#fff'; c.font = '900 13px system-ui'; c.textAlign = 'left'; c.textBaseline = 'middle'; c.fillText('!', 15, ry2 + 1); c.globalAlpha = 1;
+    }
     if (this.phase === 'port' && this.state === 'play') this.drawReticle(c);
     if (this.torp) this.glint(c, this.torp.x, this.torp.y, '#6cc4ff', 44);
     this.drawShip(c);
@@ -1072,15 +1118,12 @@
 
   F.drawBG = function (c) {
     var vw = this.vw, vh = this.vh, d = this.dist, i, L;
-    c.fillStyle = this.def.bg === 'yavin' ? '#05030e' : '#07040f'; c.fillRect(-20, -20, vw + 40, vh + 40);
-    var far = img(this.artBase, 'space/far.webp');
-    if (far) { var fw = far.width * vh / far.height, o = -((d * 0.04 + this.t * 3) % fw); c.globalAlpha = 0.7; for (var x = o; x < vw; x += fw) c.drawImage(far, x, 0, fw + 1, vh); c.globalAlpha = 1; }
-    var tunnel = this.phase === 'tunnel' || this.phase === 'escape';
-    for (L = 0; L < 3; L++) {
-      var lay = this.starLayer(L), sp = [0.05, 0.16, 0.42][L] * (tunnel ? 2.2 : 1), off = -((d * sp + this.t * [2, 6, 12][L]) % vw);
-      c.drawImage(lay, off, 0, vw, vh); c.drawImage(lay, off + vw, 0, vw, vh);
-    }
-    var tile = img(this.artBase, 'space/stars_tile.webp');
+    var tunnel = this.phase === 'tunnel' || this.phase === 'escape', inDS = this.def.bg !== 'yavin' && this.wallK > 0.985;
+    if (this.bake.far && !this.bake.far.art && img(this.artBase, 'space/far.webp')) { delete this.bake.far; delete this.bake.farD; }   // far.webp arrived after the first bake
+    var fs = this.farStrip(inDS), fo = -((d * 0.045 + this.t * 3) % fs.w);
+    for (var x = fo - 20; x < vw + 20; x += fs.w) c.drawImage(fs.cv, x, -20, fs.w + 0.5, vh + 40);   // opaque, also covers the shake margin
+    for (L = 1; L < 3; L++) this.drawStarPts(c, L, -((d * [0.05, 0.16, 0.42][L] * (tunnel ? 2.2 : 1) + this.t * [2, 6, 12][L]) % Math.ceil(vw)), L === 2, inDS ? 0.3 : 1);
+    var tile = this.fxTier < 1 && !inDS && img(this.artBase, 'space/stars_tile.webp');
     if (tile) { var tw = tile.width * vh / tile.height, to = -((d * 0.7) % tw); c.globalAlpha = 0.6; for (var tx = to; tx < vw; tx += tw) c.drawImage(tile, tx, 0, tw + 1, vh); c.globalAlpha = 1; }
     var fade = 1 - this.wallK * 0.85;
     if (this.def.bg === 'yavin') {
@@ -1089,13 +1132,13 @@
       else c.drawImage(this.planet('gas'), px - pr, py - pr, pr * 2, pr * 2);
       var grow = clamp(this.tl / 30, 0, 1), dr = 30 + 110 * grow, dx = vw * 0.32 - d * 0.004, dy = this.hudH + vh * 0.18;
       c.globalAlpha = 0.95 * fade; c.drawImage(img(this.artBase, 'space/planet_battle_moon.webp') || this.planet('ds'), dx - dr, dy - dr, dr * 2, dr * 2); c.globalAlpha = 1;
-    } else {
+    } else if (!inDS) {   // fully inside the Death Star the moons are hidden behind the superstructure
       var mr = Math.max(vw, vh) * 0.3; c.drawImage(this.planet('endor'), vw * 0.15 - d * 0.006 - mr, vh * 0.85 - mr, mr * 2, mr * 2);
       var er = Math.min(vw, vh) * 0.22; c.globalAlpha = 0.9 * fade; c.drawImage(this.planet('ds2'), vw * 0.8 - d * 0.008 - er, this.hudH + vh * 0.2 - er, er * 2, er * 2); c.globalAlpha = 1;
     }
-    if (this.def.bg !== 'yavin' && this.wallK > 0) { // inside the Death Star II superstructure
-      c.fillStyle = 'rgba(12,8,18,' + (0.82 * this.wallK) + ')'; c.fillRect(-20, -20, vw + 40, vh + 40);
-      c.globalAlpha = 0.22 * this.wallK; this.glint(c, vw, vh * 0.5, '#ff7a28', vh * 1.4); c.globalAlpha = 1;
+    if (this.def.bg !== 'yavin' && this.wallK > 0) { // inside the Death Star II superstructure (fully inside: tint is pre-baked into the far strip)
+      if (!inDS) { c.fillStyle = 'rgba(12,8,18,' + (0.82 * this.wallK) + ')'; c.fillRect(-20, -20, vw + 40, vh + 40); }
+      if (this.fxTier < 1) { c.globalAlpha = 0.22 * this.wallK; this.glint(c, vw, vh * 0.5, '#ff7a28', vh * 1.4); c.globalAlpha = 1; }
     }
     if (tunnel || this.phase === 'trench' || this.phase === 'port') { // speed lines
       c.strokeStyle = tunnel ? 'rgba(255,190,130,.22)' : 'rgba(200,220,255,.16)'; c.lineWidth = 1.5; c.beginPath();
@@ -1149,9 +1192,31 @@
 
   // ---------- HUD + cards (CSS px) ----------
   F.txt = function (c, s, x, y, col) { c.fillStyle = 'rgba(0,0,0,.75)'; c.fillText(s, x + 1.5, y + 1.5); c.fillStyle = col; c.fillText(s, x, y); };
-  F.chrome = function (c, s, x, y, size, maxW) { // 80s chrome title text
+  // HUD text sprites: text (esp. stroked/gradient) is the costliest thing to rasterise on software canvases, so anything
+  // that doesn't change every frame is drawn once into a small canvas at device resolution and blitted.
+  // measure(cx) -> [w, h, paint(x)] (paint runs with `this` = level, in a w x h CSS-px canvas).
+  F.textSprite = function (key, measure) {
+    var b = this.bake, k = 'tx:' + key, e = b[k];
+    if (e) return e;
+    if ((this.txN = (this.txN || 0) + 1) > 48) { for (var q in b) if (q.indexOf('tx:') === 0) delete b[q]; this.txN = 1; }
+    var tmp = this._mctx || (this._mctx = mkCanvas(4, 4).getContext('2d'));
+    var m = measure.call(this, tmp), d = this.dpr, cv = mkCanvas(m[0] * d, m[1] * d), x = cv.getContext('2d');
+    x.scale(d, d); m[2].call(this, x);
+    return (b[k] = { cv: cv, w: m[0], h: m[1] });
+  };
+  F.chrome = function (c, s, x, y, size, maxW) { // 80s chrome title (cached sprite)
+    var sp = this.textSprite('chrome|' + s + '|' + size + '|' + (maxW | 0), function (cx) {
+      cx.font = '900 ' + size + 'px "Trebuchet MS",Impact,sans-serif';
+      var w = cx.measureText(s).width, sz = size; if (maxW && w > maxW) { sz = Math.floor(size * maxW / w); cx.font = '900 ' + sz + 'px "Trebuchet MS",Impact,sans-serif'; w = cx.measureText(s).width; }
+      var W2 = Math.ceil(w + sz * 0.4), H2 = Math.ceil(sz * 1.6);
+      return [W2, H2, function (q) { q.sz = sz; this.chromeRaw(q, s, W2 / 2, H2 / 2, sz); }];
+    });
+    c.drawImage(sp.cv, x - sp.w / 2, y - sp.h / 2, sp.w, sp.h);
+    c.textAlign = 'center'; c.textBaseline = 'middle';
+    return sp.sz || (sp.sz = Math.round(sp.h / 1.6));
+  };
+  F.chromeRaw = function (c, s, x, y, size) {
     c.font = '900 ' + size + 'px "Trebuchet MS",Impact,sans-serif';
-    var w = c.measureText(s).width; if (maxW && w > maxW) { size = Math.floor(size * maxW / w); c.font = '900 ' + size + 'px "Trebuchet MS",Impact,sans-serif'; }
     c.textAlign = 'center'; c.textBaseline = 'middle';
     c.fillStyle = '#ff2ed8'; c.fillText(s, x + size * 0.06, y + size * 0.07);
     var g = c.createLinearGradient(0, y - size / 2, 0, y + size / 2);
@@ -1194,13 +1259,19 @@
     var cardUp = this.card && (this.card.kind === 'outro' || this.card.kind === 'dead');   // end cards own the screen: no radio over the title
     for (i = 0; i < (cardUp ? 0 : this.radio.length); i++) {
       var r = this.radio[i], bwid = Math.min(W_ - 24, 560), x0 = (W_ - bwid) / 2;
-      c.font = '700 14px "Trebuchet MS",system-ui';
-      var lines = this.wrap(c, r.text, bwid - 20), hh = 22 + lines.length * 18;
-      c.globalAlpha = Math.min(1, r.t * 3);
-      c.fillStyle = 'rgba(8,4,24,.8)'; this.rr(c, x0, ry, bwid, hh, 10); c.fill(); c.strokeStyle = '#00e5ff88'; c.lineWidth = 1.5; c.stroke();
-      c.fillStyle = '#00e5ff'; c.font = '900 11px system-ui'; c.textAlign = 'left'; c.fillText(r.who, x0 + 10, ry + 11);
-      c.fillStyle = '#fff'; c.font = '700 14px "Trebuchet MS",system-ui';
-      for (var l = 0; l < lines.length; l++) c.fillText(lines[l], x0 + 10, ry + 29 + l * 18);
+      var rs_ = this.textSprite('radio|' + r.who + '|' + r.text + '|' + bwid, function (cx) {   // rasterised once per line of dialogue
+        cx.font = '700 14px "Trebuchet MS",system-ui';
+        var lines = this.wrap(cx, r.text, bwid - 20), hh = 22 + lines.length * 18;
+        return [bwid + 4, hh + 4, function (x) {
+          x.translate(2, 2); x.textBaseline = 'middle';
+          x.fillStyle = 'rgba(8,4,24,.8)'; this.rr(x, 0, 0, bwid, hh, 10); x.fill(); x.strokeStyle = '#00e5ff88'; x.lineWidth = 1.5; x.stroke();
+          x.fillStyle = '#00e5ff'; x.font = '900 11px system-ui'; x.textAlign = 'left'; x.fillText(r.who, 10, 11);
+          x.fillStyle = '#fff'; x.font = '700 14px "Trebuchet MS",system-ui';
+          for (var l = 0; l < lines.length; l++) x.fillText(lines[l], 10, 29 + l * 18);
+        }];
+      });
+      var hh = rs_.h - 4;
+      c.globalAlpha = Math.min(1, r.t * 3); c.drawImage(rs_.cv, x0 - 2, ry - 2, rs_.w, rs_.h);
       c.globalAlpha = 1; ry += hh + 6;
     }
     if (this.toast) {
@@ -1209,7 +1280,7 @@
       this.txt(c, tt.text, W_ / 2, H_ * (H_ > W_ ? 0.66 : 0.72) - tt.t * 10, tt.col); c.globalAlpha = 1;
     }
     if (this.banner) this.drawBanner(c, W_, H_);
-    if (this.card) this.drawCard(c, W_, H_);
+    if (this.card) { this.drawCard(c, W_, H_); if (this.card.kind === 'intro' || this.card.kind === 'resume') this.warmArt(c); }
     var hideBtn = this.state !== 'play' ? '0' : '1'; if (this.input.btn && this.input.btn.style.opacity !== hideBtn) { this.input.btn.style.opacity = hideBtn; this.input.btn.style.pointerEvents = hideBtn === '1' ? 'auto' : 'none'; }
     if (this.t < 6.5 && this.t > 3.3 && this.state === 'play' && !this.card && !this.opts.startAt) {   // first-time hint only, not on checkpoint resumes
       c.globalAlpha = Math.min(1, 6.5 - this.t); c.textAlign = 'center'; c.font = '800 13px system-ui';
@@ -1243,20 +1314,34 @@
     var inA = Math.min(1, t / 0.3), outA = cd.kind === 'intro' ? clamp((3.4 - t) / 0.4, 0, 1) : 1, a = Math.min(inA, outA);
     var bar = Math.min(H_ * 0.13, 74) * a;
     c.fillStyle = '#000'; c.fillRect(0, 0, W_, bar); c.fillRect(0, H_ - bar, W_, bar);
-    c.globalAlpha = a * (cd.kind === 'dead' ? 0.55 : 0.4); c.fillStyle = cd.kind === 'dead' ? '#3a0010' : '#0a0220'; c.fillRect(0, bar, W_, H_ - bar * 2); c.globalAlpha = 1;
-    var hy = H_ * 0.64, gh = H_ - bar - hy; // synthwave horizon grid
-    if (gh > 20) {
-      c.globalAlpha = a * 0.5; c.strokeStyle = cd.kind === 'dead' ? '#ff3060' : '#ff2ed8'; c.lineWidth = 1.2; c.beginPath();
-      for (i = -12; i <= 12; i++) { c.moveTo(W_ / 2 + i * 14, hy); c.lineTo(W_ / 2 + i * W_ * 0.16, H_ - bar); }
-      for (i = 0; i < 8; i++) { var f = (i + (t * 1.5) % 1) / 8, yy = hy + gh * f * f; c.moveTo(0, yy); c.lineTo(W_, yy); }
+    var hy = H_ * 0.64, gh = H_ - bar - hy, dead = cd.kind === 'dead';
+    // tint + static synthwave grid + horizon glow + scanlines, baked once per card kind and size: one blit per frame
+    var ov = this.getBake('cardov' + (dead ? 'D' : ''), function () {
+      var d = this.dpr, cv = mkCanvas(W_ * d, H_ * d), x = cv.getContext('2d'), j, B = Math.min(H_ * 0.13, 74), G = H_ - B - hy;
+      x.scale(d, d);
+      x.fillStyle = dead ? 'rgba(58,0,16,.55)' : 'rgba(10,2,32,.4)'; x.fillRect(0, 0, W_, H_);
+      if (G > 20) {
+        x.globalAlpha = 0.5; x.strokeStyle = dead ? '#ff3060' : '#ff2ed8'; x.lineWidth = 1.2; x.beginPath();
+        for (j = -12; j <= 12; j++) { x.moveTo(W_ / 2 + j * 14, hy); x.lineTo(W_ / 2 + j * W_ * 0.16, H_ - B); }
+        x.stroke(); x.globalAlpha = 1;
+        var sg = x.createLinearGradient(0, hy - 60, 0, hy); sg.addColorStop(0, 'rgba(255,46,216,0)'); sg.addColorStop(1, 'rgba(255,46,216,.35)'); x.fillStyle = sg; x.fillRect(0, hy - 60, W_, 60);
+      }
+      x.fillStyle = 'rgba(0,0,0,.14)'; for (j = 0; j < H_; j += 4) x.fillRect(0, j, W_, 2);
+      return cv;
+    });
+    c.save(); c.beginPath(); c.rect(0, bar, W_, H_ - bar * 2); c.clip();
+    c.globalAlpha = a; c.drawImage(ov, 0, 0, W_, H_);
+    if (gh > 20) { // animated horizon lines only
+      c.globalAlpha = a * 0.5; c.strokeStyle = dead ? '#ff3060' : '#ff2ed8'; c.lineWidth = 1.2; c.beginPath();
+      for (i = 0; i < 8; i++) { var f = (i + (t * 1.5) % 1) / 8, yy = Math.round(hy + gh * f * f) + 0.5; c.moveTo(0, yy); c.lineTo(W_, yy); }
       c.stroke();
-      c.globalAlpha = a; var sg = c.createLinearGradient(0, hy - 60, 0, hy); sg.addColorStop(0, 'rgba(255,46,216,0)'); sg.addColorStop(1, 'rgba(255,46,216,.35)'); c.fillStyle = sg; c.fillRect(0, hy - 60, W_, 60); c.globalAlpha = 1;
     }
+    c.restore(); c.globalAlpha = 1;
     var cy = H_ * 0.36;
     c.globalAlpha = a; c.textAlign = 'center'; c.textBaseline = 'middle';
     if (cd.kind === 'intro') {
       c.font = '900 14px system-ui'; this.txt(c, 'STAGE ' + this.def.id.toUpperCase() + ' · ' + this.pilot.call, W_ / 2, cy - 52, '#00e5ff');
-      this.chrome(c, this.def.name, W_ / 2, cy, Math.round(46 * (1 + 0.4 * Math.max(0, 1 - t / 0.3))), W_ - 24);
+      var zz = 1 + 0.4 * Math.max(0, 1 - t / 0.3); c.save(); c.translate(W_ / 2, cy); c.scale(zz, zz); this.chrome(c, this.def.name, 0, 0, 46, W_ - 24); c.restore(); c.globalAlpha = a; c.textAlign = 'center'; c.textBaseline = 'middle';
       c.font = '800 14px "Trebuchet MS",system-ui'; c.textAlign = 'center'; var sl = this.wrap(c, this.fmt(this.def.tagline || ''), W_ - 40);
       for (i = 0; i < sl.length; i++) this.txt(c, sl[i], W_ / 2, cy + 40 + i * 19, '#ffffff');
       if (t > 1.4) { var go = t > 2.7; if (go || Math.floor(t * 5) % 2 === 0) { c.font = '900 30px "Trebuchet MS",Impact,sans-serif'; this.txt(c, go ? 'GO!' : 'READY?', W_ / 2, cy + 40 + sl.length * 19 + 34, go ? '#7dff8a' : '#ffe66d'); } }
@@ -1279,7 +1364,6 @@
       this.txt(c, this.checkpoint > 0 ? 'Back to the last checkpoint' : 'Back to the start', W_ / 2, cy + 40, '#ffd0d0');
       if (this.opts.standalone && t > 1) this.txt(c, 'TAP TO RETRY', W_ / 2, cy + 64, '#ffffffcc');
     }
-    c.globalAlpha = a * 0.5; c.fillStyle = this.scan(); c.fillRect(0, bar, W_, H_ - bar * 2); c.globalAlpha = 1;
   };
   F.hpPip = function (c, x, y, on, crit) { c.fillStyle = 'rgba(0,0,0,.6)'; this.heart(c, x + 1, y + 1); c.fillStyle = on ? (crit ? '#ffffff' : '#ff3b6b') : '#ffffff33'; this.heart(c, x, y); };
   F.heart = function (c, x, y) { c.beginPath(); c.moveTo(x, y + 7); c.bezierCurveTo(x - 11, y - 1, x - 6, y - 10, x, y - 4); c.bezierCurveTo(x + 6, y - 10, x + 11, y - 1, x, y + 7); c.fill(); };
@@ -1294,7 +1378,7 @@
     return { state: this.state, phase: this.phase, tl: this.tl, hp: this.hp, score: this.score, kills: this.kills, shots: this.shots, accuracy: this.accuracy(),
       ship: { x: this.ship.x, y: this.ship.y }, bullets: this.bul.length, enemies: this.en.length, parts: this.parts.length,
       boss: this.boss ? { type: this.boss.type, hp: this.boss.hp, phase: this.boss.bphase } : null, checkpoint: this.checkpoint, passes: this.passes,
-      view: { vw: this.vw, vh: this.vh, scale: this.scale, cw: this.cw, ch: this.ch, rs: this.rs }, fireLabel: this.input.btn.textContent,
+      view: { vw: this.vw, vh: this.vh, scale: this.scale, cw: this.cw, ch: this.ch, rs: this.rs, fxTier: this.fxTier }, fireLabel: this.input.btn.textContent,
       hud: this.hudRects, card: this.card && this.card.kind, radio: this.radio.map(function (r) { return r.who + ': ' + r.text; }) };
   };
   F.destroy = function () { this.input.destroy(); };

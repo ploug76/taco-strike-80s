@@ -65,13 +65,13 @@ function synthMusic(key){const prog=SONGS[key]||SONGS.rainbow;const a=AU.ctx;con
 const K={};const inp={L:0,R:0,U:0,D:0,jump:0,jumpPressed:0,throw:0,throwPressed:0,steer:{x:0,y:0}};
 const VIRT={jump:0,throw:0};const TOUCH=new Map();let lastJumpHeld=0,lastThrowHeld=0,swipeJump=0;
 const KEYMAP={ArrowLeft:'L',KeyA:'L',ArrowRight:'R',KeyD:'R',ArrowUp:'U',KeyW:'U',ArrowDown:'D',KeyS:'D',Space:'J',KeyJ:'J',KeyZ:'J',KeyK:'T',KeyX:'T'};
-addEventListener('keydown',e=>{AU.unlock();const k=KEYMAP[e.code];if(k){K[k]=1;e.preventDefault()}if(e.code==='KeyP'||e.code==='Escape'){if(state==='play')pauseGame();else if(state==='pause')resumeGame()}if(e.code==='KeyM')AU.mute(!AU.muted);if(e.code==='Enter'&&state==='title')toSelect()});
+addEventListener('keydown',e=>{AU.unlock();const k=KEYMAP[e.code];if(k){K[k]=1;e.preventDefault()}if(e.code==='KeyP'||e.code==='Escape'){if(state==='play')pauseGame();else if(state==='pause')resumeGame()}if(e.code==='KeyM')AU.mute(!AU.muted);if(e.code==='KeyC'&&state==='play')swapBuddy();if(e.code==='Enter'&&state==='title')toSelect()});
 addEventListener('keyup',e=>{const k=KEYMAP[e.code];if(k)K[k]=0});
 function swipeDir(t){let dx=t.x-t.ax,dy=t.y-t.ay;const d=Math.hypot(dx,dy);t.sx=clamp((t.x-t.ox)/60,-1,1);t.sy=clamp((t.y-t.oy)/60,-1,1);const o={};if(d<14)return o;if(d>44){t.ax=t.x-dx/d*44;t.ay=t.y-dy/d*44}
  const s=Math.round(Math.atan2(dy,dx)/(Math.PI/4));if(s===0||s===1||s===-1)o.R=1;if(s===4||s===-4||s===3||s===-3)o.L=1;if(s===2||s===1||s===3)o.D=1;if(s===-2||s===-1||s===-3)o.U=1;return o}
-function tStart(id,x,y){AU.unlock();TOUCH.set(id,{x,y,ax:x,ay:y,ox:x,oy:y,z:{},sx:0,sy:0})}
-function tMove(id,x,y){const t=TOUCH.get(id);if(!t)return;t.x=x;t.y=y;const before=t.z.U;t.z=swipeDir(t);if(t.z.U&&!before)swipeJump=1}
-function tEnd(id){TOUCH.delete(id)}
+function tStart(id,x,y){AU.unlock();TOUCH.set(id,{x,y,ax:x,ay:y,ox:x,oy:y,z:{},sx:0,sy:0,t0:performance.now(),mx:0})}
+function tMove(id,x,y){const t=TOUCH.get(id);if(!t)return;t.x=x;t.y=y;t.mx=Math.max(t.mx,Math.hypot(x-t.ox,y-t.oy));const before=t.z.U;t.z=swipeDir(t);if(t.z.U&&!before)swipeJump=1}
+function tEnd(id){const t=TOUCH.get(id);TOUCH.delete(id);if(t&&t.mx<14&&performance.now()-t.t0<320)tapWorld(t.ox,t.oy)}
 cv.addEventListener('touchstart',e=>{e.preventDefault();for(const t of e.changedTouches)tStart(t.identifier,t.clientX,t.clientY)},{passive:false});
 cv.addEventListener('touchmove',e=>{e.preventDefault();for(const t of e.changedTouches)tMove(t.identifier,t.clientX,t.clientY)},{passive:false});
 cv.addEventListener('touchend',e=>{e.preventDefault();for(const t of e.changedTouches)tEnd(t.identifier)},{passive:false});
@@ -102,7 +102,7 @@ function artQueue(theme){const pri=ART_ALL.filter(f=>!ART_REQ[f]&&(f.startsWith(
 function levelArt(L){if(!L)return[];const need=new Set();const add=f=>{if(ART_ALL.includes(f))need.add(f)};const pre=d=>ART_ALL.filter(f=>f.startsWith(d)).forEach(f=>need.add(f));
  pre('art/'+(L.mode==='bike'?'endor':L.theme)+'/');if(L.mode==='flight'){pre('art/ships/');pre('art/space/')}
  (L.enemies||[]).forEach(e=>add('art/enemies/'+e.type+'.webp'));if(L.mode==='bike'){add('art/enemies/scout_trooper_bike.webp');add('art/hero/taco_bike.webp')}
- (L.allies||[]).forEach((a,i,arr)=>add('art/allies/'+allyKey(selfSub(a.who,arr.map(o=>o.who)))+'.webp'));add('art/allies/chewbacca.webp');
+ castAllies(L).forEach(a=>add('art/allies/'+allyKey(a.who)+'.webp'));add('art/allies/chewbacca.webp');
  const bosses=(L.gauntlet||[]).map(g=>g.boss).concat(L.boss?[L.boss]:[]);bosses.forEach(b=>{const t=BOSS_ALIAS[b]||b,d=BT[t];if(d)pre('art/bosses/'+(d.art||t))});
  const js=JSON.stringify(L);ART_ALL.forEach(f=>{const m=f.match(/^art\/(enemies|allies|props)\/([a-z0-9_]+)\.webp$/);if(m&&js.includes('"'+m[2]+'"'))need.add(f)});
  if(L.theme==='tatooine')['sarlacc','skiff','sail_barge'].forEach(k=>add('art/props/'+k+'.webp'));if(L.theme==='ewok')['ewok_hut','rope_bridge'].forEach(k=>add('art/props/'+k+'.webp'));
@@ -145,7 +145,7 @@ function startLevel(id){const L=LEVELS[id];if(!L){console.warn('missing level',i
  G={id,L,mode:L.mode,theme:L.theme,t:0,cam:{x:0,y:VH-VV},parts:[],texts:[],shots:[],eshots:[],enemies:[],pickups:[],plats:[],solids:[],hazards:[],springs:[],checkpoints:[],allies:[],boss:null,shake:0,hs:0,combo:0,comboT:0,clear:false,clearT:0,deadT:0,banner:{s:L.name,t:2.6},bossOn:false,arena:null,flash:0,bg:L.bg||L.theme};
  if(L.mode==='flight'){G.p={x:0,y:0,w:1,h:1,hp:5,maxHp:5};return startFlight(L)}
  const p={x:L.start.x,y:L.start.y-50,w:30,h:46,vx:0,vy:0,onGround:false,face:1,coy:0,jb:0,runT:0,inv:1.5,star:0,throwT:0,cool:0,dj:0,jumping:false,ladder:false,dead:false,anim:0};
- if(CH==='chewie'){p.w=32;p.h=62}else if(CH==='ewok'){p.w=28;p.h=40}else if(CH!=='taco'&&CH!=='carebear'){p.h=58}
+ PC=CH;{const [w,h]=sizeFor(PC);p.w=w;p.h=h}
  G.p=p;Object.assign(p,{hp:run.hp,maxHp:5});
  if(L.mode==='flight')return startFlight(L);
  for(const g of L.ground)G.solids.push({x:g[0],y:g[2],w:g[1]-g[0],h:600-g[2]+80,type:'ground'});
@@ -154,7 +154,7 @@ function startLevel(id){const L=LEVELS[id];if(!L){console.warn('missing level',i
  for(const h of G.hazards)if(h.type==='sarlacc'){h.y=h.y||460;const cx=h.x+h.w/2;if(!G.solids.some(s=>cx>=s.x&&cx<=s.x+s.w&&Math.abs(s.y-h.y)<30))G.solids.push({x:h.x-2,y:h.y,w:h.w+4,h:140,type:'sand'})}G.springs=(L.springs||[]).map(s=>({x:s.x,y:s.y,sq:0}));G.checkpoints=(L.checkpoints||[]).map(k=>({x:k.x,on:false}));
  for(const e of L.enemies)spawnEnemy(e);
  G.pickups=(L.pickups||[]).map(q=>({type:q.type,x:q.x,y:q.y,got:false}));
- G.allies=(L.allies||[]).map((a,i,arr)=>Object.assign({},a,{who:selfSub(a.who,arr.map(o=>o.who))})).map(a=>({who:a.who,x:a.x,y:a.y||460,say:a.say||'',gift:a.gift,met:false,sayT:0,fights:a.fights||a.who==='chewbacca',cool:1,follow:false,vx:0}));
+ G.buddy=null;G.swaps=0;G.allies=castAllies(L).map(a=>Object.assign({},a,{who:a.who,orig:a.orig,x:a.x,y:a.y||460,say:a.say||'',gift:a.gift,met:false,sayT:0,fights:a.fights||a.who==='chewbacca',cool:1,follow:false,vx:0}));G.buddy=makeBuddy(L,G.p);
  G.obstacles=(L.obstacles||[]).map(o=>Object.assign({},o));G.respawn={x:L.start.x,y:L.start.y-50};
  if(L.mode==='bike'){p.bike=1;p.y=280;p.h=40;p.w=70;p.vx=TUNE.bikeSpeed}
  if(L.mode==='boss'||L.boss&&L.boss!=='bike')G.bossType=L.boss;G.gaunt=Array.isArray(L.gauntlet)&&L.gauntlet.length?L.gauntlet.map(g=>Object.assign({},g,{done:false})):null;G.gi=0;G.allBossDone=false;G.marks=[];G.reach=[];G.tint=0;G.dim=0;
@@ -178,7 +178,7 @@ function colY(o){const pb=(o.prevY!==undefined?o.prevY:o.y)+o.h;o.onGround=false
   if(o.vy>=0&&pb<=top+6&&o.y+o.h>=top&&o.x+o.w>s.x+2&&o.x<s.x+s.w-2){o.y=top-o.h;o.onGround=true;o.ride=s;o._onOneway=true;
    if(s.type==='cloud'&&o.vy>(TUNE.cloudMinImpact||380)){o.vy=-(TUNE.cloudBounce||280);o.onGround=false}else o.vy=0}}}
 const PT={collideX:colX,collideY:colY,ladderAt:o=>G.plats.find(s=>s.type==='ladder'&&o.x+o.w>s.x&&o.x<s.x+s.w&&o.y+o.h>s.y&&o.y<s.y+s.h)||null};
-function stepPlayer(dt){const p=G.p,T=TUNE,ch=CHARS[CH];
+function stepPlayer(dt){const p=G.p,T=TUNE,ch=charOf(PC);
  if(window.TacoPhysics&&TacoPhysics.stepPlayer){p.speedMult=ch.speed;const wasG=p.onGround,fv=p.vy;
   TacoPhysics.stepPlayer(p,inp,dt,PT);
   for(const e of p.events||[]){if(e.type==='jump'){AU.fx('jump');dust(p.x+p.w/2,p.y+p.h,6)}else if(e.type==='pound'){poundAt(e.x,e.y,e.radius)}else if(e.type==='pound_start'){AU.fx('roll')}}
@@ -216,13 +216,15 @@ function hurtPlayer(src){const p=G.p;if(p.inv>0||p.star>0||p.dead||G.clear)retur
  if(window.TacoPhysics&&TacoPhysics.hurt){p.iframes=0;TacoPhysics.hurt(p,src?src.x:p.x+p.w/2+p.face)}else{p.vy=-420;p.vx=(src&&src.x>p.x?-1:1)*260}if(p.hp<=0)killPlayer()}
 function killPlayer(why){const p=G.p;if(p.dead||G.clear)return;p.dead=true;G.deadT=2.2;run.lives--;AU.fx(why==='sarlacc'?'sarlacc':'die');shake(16);burst(p.x+p.w/2,p.y+p.h/2,40,['#ffe94b','#ff4a4a','#5ad84a','#ffffff'],400,1,5);
  if(why==='sarlacc')text(p.x,p.y-30,'SWALLOWED BY THE SARLACC!','#ffcc66',1);else if(why==='pit')text(p.x,G.cam.y+300,'OOPS!','#fff',1)}
-function respawn(){const p=G.p;if(run.lives<=0){return gameOver()}p.dead=false;p.captured=null;p.capT=0;p.pound=0;p.iframes=0;p.hurtLock=0;p.hp=p.maxHp;run.hp=p.hp;p.x=G.respawn.x;p.y=G.respawn.y;p.vx=p.vy=0;p.inv=2;if(G.mode==='bike'){p.y=280;p.vx=TUNE.bikeSpeed}
- G.enemies.forEach(e=>{if(e.dead&&!e.gone&&Math.abs(e.x0-p.x)>600){}});G.eshots=[];G.marks=[];G.reach=[];p.holdT=0;
+function respawn(){const p=G.p;if(run.lives<=0){return gameOver()}p.dead=false;p.captured=null;p.capT=0;p.pound=0;p.iframes=0;p.hurtLock=0;p.hp=p.maxHp;run.hp=p.hp;p.x=G.respawn.x;p.y=G.respawn.y;p.vx=p.vy=0;p.inv=2.5;p.iframes=2.5;p.spawnT=1;if(G.mode==='bike'){p.y=280;p.vx=TUNE.bikeSpeed}
+ else if(G.mode==='platform'){const sx=safeX(p.x,p.w);if(sx!==p.x||!hasGround(p.x+p.w/2)){p.x=sx;p.y=findGround(sx+p.w/2)-p.h-4}
+  G.cam.x=clamp(p.x+p.w/2-viewW*(portrait?0.38:0.33),0,Math.max(0,G.L.width-viewW));G.cam.minX=G.cam.x;G.cam.y=VV>=VH?0:clamp(p.y+p.h/2-VV*0.55,0,VH-VV)}
+ G.enemies.forEach(e=>{if(e.dead&&!e.gone&&Math.abs(e.x0-p.x)>600){}});G.eshots=[];G.marks=[];G.reach=[];p.holdT=0;if(G.buddy)buddyWarp(G.buddy,p);
  if(G.boss&&!G.boss.dead){G.enemies.forEach(e=>{if(!e.dead&&G.arena&&e.x>G.arena.x0-100&&e.x<G.arena.x1+100)e.gone=true});G.boss=null;G.arena=null;G.bossOn=false;G.tint=0;G.dim=0;AU.play(G.L.music||G.theme)}}
 /* ---------------- weapons ---------------- */
 const TOPS=['lettuce','tomato','cheese','jalapeno','salsa'];
-function doThrow(){const p=G.p,ch=CHARS[CH];if(p.cool>0||p.dead)return;
- const x=p.x+p.w/2+p.face*16,y=p.y+(CH==='taco'?14:p.h*0.35);let k=null;
+function doThrow(){const p=G.p,ch=charOf(PC);if(p.cool>0||p.dead)return;
+ const x=p.x+p.w/2+p.face*16,y=p.y+(PC==='taco'?14:p.h*0.35);let k=null;
  if(ch.weapon==='toppings'){let sel=run.sel;if(!(run.ammo[sel]>0))sel=TOPS.find(t=>run.ammo[t]>0);if(!sel){if(inp.throwPressed){text(p.x,p.y-20,'OUT OF TOPPINGS!','#ffcc66');AU.fx('nope')}p.cool=0.3;return}run.sel=sel;run.ammo[sel]--;k=sel}
  else if(ch.weapon==='sword'){p.cool=0.32;p.throwT=0.2;AU.fx('throw');G.shots.push({kind:'sword',x:x+p.face*18,y:y,vx:p.face*60+p.vx,vy:0,l:0.16,dmg:2,pierce:1,r:34,rot:p.face<0?Math.PI:0,melee:1});if(run.power>0&&inp.throwPressed){run.power--;G.shots.push({kind:'sword',x,y,vx:p.face*620,vy:0,l:0.7,dmg:2,pierce:1,r:22,rot:p.face<0?Math.PI:0})}return}
  else{if(run.power<=0){if(inp.throwPressed){text(p.x,p.y-20,'NO POWER! GRAB TOPPINGS',ch.weapon==='bolt'?'#ffcc66':'#fff');AU.fx('nope')}p.cool=0.3;return}run.power--;k=ch.weapon}
@@ -316,16 +318,18 @@ function stepWorld(dt){const p=G.p;
  // checkpoints
  for(const k of G.checkpoints){if(!k.on&&p.x>k.x-10){k.on=true;G.respawn={x:k.x,y:findGround(k.x)-p.h-4};AU.fx('checkpoint');text(k.x,findGround(k.x)-110,'CHECKPOINT!','#7ff7ff',1);burst(k.x,findGround(k.x)-80,30,['#7ff7ff','#ff4bd8','#ffe94b'],300,0.8,4)}}
  // allies
- for(const a of G.allies){a.t=(a.t||0)+dt;allyAmmo(a,dt);if(a.sayT>0)a.sayT-=dt;const d=Math.abs(p.x+p.w/2-a.x);
+ for(const a of G.allies){if(playKey(a.who)===PC)continue;a.t=(a.t||0)+dt;allyAmmo(a,dt);if(a.sayT>0)a.sayT-=dt;const d=Math.abs(p.x+p.w/2-a.x);
   if(!a.met&&d<110&&!(a.trigger==='boss_phase')){a.met=true;a.sayT=3.2;AU.fx(a.who==='chewbacca'?'roar':'pickup');if(a.gift){G.pickups.push({type:a.gift,x:a.x+20,y:a.y-70,got:false,pop:1,vy:-380})}(a.give||[]).forEach((g,i)=>G.pickups.push({type:g,x:a.x+i*24,y:a.y-70,got:false,pop:1,vy:-380}));if(a.action==='follow'||a.fights)a.follow=true;if(a.action==='roar_scare'||a.who==='chewbacca')G.enemies.forEach(e=>{if(Math.abs(e.x-a.x)<400&&!e.dead){e.dir=e.x>a.x?1:-1;e.flee=3}})}
-  if(a.trigger==='boss_phase'&&G.boss&&!G.boss.dead&&!a.met&&G.boss.phase>=(a.phase||2)&&(!a.boss||(BOSS_ALIAS[a.boss]||a.boss)===G.boss.type)){a.met=true;a.sayT=3;a.x=clamp(p.x-60,G.arena?G.arena.x0+30:0,1e9);AU.fx(a.who==='chewbacca'?'roar':'star');if(a.who==='chewbacca'){const B=G.boss;if(B.type==='big_helmet'){B.ally=1;a.ammoT=6}else if(B.type==='skeletor'){damageBoss(3,B.x,B.y-60);B.x=clamp(B.x,G.arena.x0+60,G.arena.x1-60);B.gy=findGround(B.x);B.y=B.gy;B.state='floored';B.st=3;B.ghost=0;B.alpha=1;text(B.x,B.y-B.dh-14,'KNOCKED OFF THE THRONE!','#ffcc66',1)}else{B.stun=3;damageBoss(4,B.x,B.y-60)}}else{p.shield=1;text(p.x,p.y-30,'SHIELD!','#7ff7ff',1)}a.follow=true}
+  if(a.trigger==='boss_phase'&&G.boss&&!G.boss.dead&&!a.met&&G.boss.phase>=(a.phase||2)&&(!a.boss||(BOSS_ALIAS[a.boss]||a.boss)===G.boss.type)){a.met=true;a.sayT=3;a.x=clamp(p.x-60,G.arena?G.arena.x0+30:0,1e9);AU.fx(a.who==='chewbacca'?'roar':'star');if(a.who==='chewbacca'||a.orig==='chewbacca'){const B=G.boss;if(B.type==='big_helmet'){B.ally=1;a.ammoT=6}else if(B.type==='skeletor'){damageBoss(3,B.x,B.y-60);B.x=clamp(B.x,G.arena.x0+60,G.arena.x1-60);B.gy=findGround(B.x);B.y=B.gy;B.state='floored';B.st=3;B.ghost=0;B.alpha=1;text(B.x,B.y-B.dh-14,'KNOCKED OFF THE THRONE!','#ffcc66',1)}else{B.stun=3;damageBoss(4,B.x,B.y-60)}}else{p.shield=1;text(p.x,p.y-30,'SHIELD!','#7ff7ff',1)}a.follow=true}
   if(a.follow&&(!a.until_x||p.x<a.until_x)){const tx=p.x-p.face*70;a.x+=clamp(tx-a.x,-1,1)*Math.min(Math.abs(tx-a.x)*4,380)*dt;a.y=findGround(a.x);a.face=p.face;a.cool-=dt;
    if(a.cool<=0){let best=null,bd=420;for(const e of G.enemies)if(!e.dead&&Math.abs(e.x-a.x)<bd&&Math.abs(e.y-a.y)<160){bd=Math.abs(e.x-a.x);best=e}
     const tgt=best||(G.boss&&!G.boss.dead&&Math.abs(G.boss.x-a.x)<500?G.boss:null);if(tgt){const dir=tgt.x>a.x?1:-1;G.shots.push({kind:'bolt',x:a.x+dir*20,y:a.y-40,vx:dir*820,vy:0,l:0.9,dmg:2,r:9,rot:dir<0?Math.PI:0});a.cool=1.6;a.face=dir;AU.fx('laser')}}}}
  // goal
  const gl=G.L.goal;if(!G.clear&&!p.dead&&(!G.boss||G.boss.dead)&&(!G.bossType||G.allBossDone)&&p.x+p.w>gl.x-10&&p.x<gl.x+40)levelClear()}
+function hasGround(x){return G.solids.some(s=>s.type!=='sand'&&x>=s.x&&x<=s.x+s.w&&s.y<VH)}
+function safeX(x,w){const ok=x=>hasGround(x+4)&&hasGround(x+w-4);if(ok(x))return x;for(let d=16;d<1600;d+=16){if(ok(x-d))return x-d;if(ok(x+d)&&x+d<G.L.width-60)return x+d}return x}
 function findGround(x){let best=600;for(const s of G.solids)if(x>=s.x&&x<=s.x+s.w&&s.y<best)best=s.y;return best===600?460:best}
-function collect(q){q.got=true;const p=G.p;const ch=CHARS[CH];
+function collect(q){q.got=true;const p=G.p;const ch=charOf(PC);
  switch(q.type){case'coin':run.coins++;run.score+=100;AU.fx('coin');burst(q.x,q.y,6,['#ffe94b','#fff'],120,0.3,3);if(run.coins%100===0){run.lives++;AU.fx('oneup');text(q.x,q.y-20,'1-UP!','#5ad84a',1)}return;
   case'heart':p.hp=Math.min(p.maxHp,p.hp+1);text(q.x,q.y-20,'+1 HEALTH','#ff7ab8');AU.fx('heal');break;
   case'taco_shell':p.hp=p.maxHp;text(q.x,q.y-20,'FULL HEALTH!','#ffd23a');AU.fx('heal');break;
@@ -491,6 +495,7 @@ function stepBoss(dt){const b=G.boss,p=G.p;if(!b)return;b.t+=dt;if(b.flash>0)b.f
  if(b.dead){b.dt+=dt;if(b.dt>1.8&&!b.released){b.released=1;G.arena=null;G.tint=0;
    if(G.gaunt){G.gaunt[G.gi].done=true;G.gi++;if(G.gi>=G.gaunt.length)G.allBossDone=true;else{G.banner={s:'NEXT: '+(G.gaunt[G.gi].stage||'').toUpperCase(),t:2.4};AU.play(G.L.music||'final')}setTimeout(()=>{if(G&&G.boss===b)G.boss=null},1500)}
    else G.allBossDone=true}return}
+ if(G.arena&&portrait&&b.y>-100){const m=Math.min(b.w/2+8,viewW*0.3);b.x=clamp(b.x,Math.max(G.arena.x0,G.cam.x)+m,G.cam.x+viewW-m)}
  if(b.intro>0){b.intro-=dt;return}if(b.stun>0){b.stun-=dt;b.flash=Math.sin(b.t*30)>0?0.05:0;return}
  const sp=b.phase===3?1.5:b.phase===2?1.2:1;b.cool-=dt*sp;const dx=p.x+p.w/2-b.x;b.dir=dx>0?1:-1;const A=G.arena;
  const aim=(spd,kind,oy=0.6)=>{const sx=b.x+b.dir*b.w*0.3,sy=b.y-b.h*oy;const a=Math.atan2(p.y+p.h/2-sy,p.x+p.w/2-sx);eshot(sx,sy,Math.cos(a)*spd,Math.sin(a)*spd,kind)};
@@ -575,7 +580,7 @@ function howTo(){state='howto';showUI(`<h2>HOW TO PLAY</h2><ul class="how">
 <li><b>Jump:</b> tap <b>JUMP</b> or swipe up. Hold for a higher jump.</li>
 <li><b>Throw:</b> tap <b>THROW</b>. The taco throws his toppings: lettuce (fast), tomato (lob, bounces), cheese (rapid), jalapeño (fire, goes through), salsa (3-way spread). Tap the topping box at the top to switch.</li>
 <li><b>Stomp:</b> jump on enemies. Hold JUMP when you land on one for a big combo bounce. Swipe down in the air for a ground pound.</li>
-<li><b>Refill:</b> grab toppings for ammo, hearts and taco shells for health, stars to be invincible.</li>
+<li><b>Buddy swap:</b> your helper follows you all level. <b>Tap the helper</b> (quick tap, no swipe) to swap and play as them; tap again to swap back. Keyboard: C.</li><li><b>Refill:</b> grab toppings for ammo, hearts and taco shells for health, stars to be invincible.</li>
 <li><b>Speeder bike:</b> swipe up or down to steer over trees and logs. THROW fires blasters.</li>
 <li><b>X-wing &amp; Falcon:</b> drag to fly, hold FIRE.</li>
 <li><b>Watch out:</b> the Sarlacc pulls you in. Jump to escape!</li>
@@ -586,7 +591,7 @@ function portrait1(cc,key){const si=D.IMG['art/select/'+SEL[key]];if(si&&key!=='
 /* ---------------- rendering ---------------- */
 const HERO_FRAMES={joe:'art/players/snake_eyes'};
 const HERO_ART={rainbow:'art/allies/rainbow_brite',carebear:'art/allies/care_bear_tenderheart',shera:'art/allies/she_ra',joe:'art/allies/snake_eyes',chewie:'art/allies/chewbacca',ewok:'art/allies/wicket'};
-function drawHero(x,key,a,menu){
+function drawHero(x,key,a,menu){if(key&&key.startsWith('h:'))return drawForm(x,key,a);
  if(key==='taco'&&D.IMG['art/hero/taco']){const fr=a.hurt?'taco_hurt':a.air?'taco_jump':a.throwT>0?'taco_throw':a.run?(Math.floor(a.t*10)%2?'taco_run1':'taco_run2'):'taco';const im=D.IMG['art/hero/'+fr]||D.IMG['art/hero/taco'];const h=64,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
  const hf=HERO_FRAMES[key];if(hf&&D.IMG[hf]){const fr=a.hurt?'_hurt':a.air?'_jump':a.throwT>0?'_throw':a.run?(Math.floor(a.t*10)%2?'_run1':'_run2'):'';const im=D.IMG[hf+fr]||D.IMG[hf];const h=74,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
  const ak=HERO_ART[key];const im=ak&&D.IMG[ak];if(im){const h=key==='chewie'?84:key==='ewok'?52:72,s=h/im.height;let dy=0,rot=0,sx=1,sy=1;if(key==='ewok'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t,a.run?55:0);dy=g.dy||0;rot=g.rot||0;sx=g.sx||1;sy=g.sy||1}else if(a.run){dy=-Math.abs(Math.sin(a.t*13))*3;rot=Math.sin(a.t*13)*0.05}
@@ -653,7 +658,7 @@ function drawWorld(){const t=G.t,L=G.L,x0=G.cam.x-100,x1=G.cam.x+viewW+100,theme
  // pickups
  for(const q of G.pickups){if(q.got||q.x<x0||q.x>x1)continue;c.save();c.translate(q.x,q.y);D.pickup(c,q.type,t+q.x*0.01);c.restore()}
  // allies
- for(const a of G.allies){if(a.x<x0||a.x>x1)continue;c.save();c.translate(a.x,a.y);if(a.face<0)c.scale(-1,1);const ak2='art/allies/'+allyKey(a.who);const im=D.IMG[ak2];if(!im&&ART_ALL.includes(ak2+'.webp')){c.restore();continue}if(im){const h=a.who==='chewbacca'?96:a.who==='wicket'?54:a.who==='swift_wind'?96:a.who==='twink'?40:76,s=h/im.height;let dy=Math.sin(t*3+a.x)*1.2,rot=0,sx=1,sy=1;if(a.who==='wicket'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t||0,a.follow?55:0);dy=g.dy;rot=g.rot;sx=g.sx;sy=g.sy}c.translate(0,dy);c.rotate(rot);c.scale(sx,sy);c.drawImage(im,-im.width*s/2,-h+2,im.width*s,h)}else D.ally(c,a.who,t);c.restore();
+ for(const a of G.allies){if(a.x<x0||a.x>x1||playKey(a.who)===PC)continue;c.save();c.translate(a.x,a.y);if((a.face<0?-1:1)*(ART_FACE[a.who]||1)<0)c.scale(-1,1);const ak2='art/allies/'+allyKey(a.who);const im=D.IMG[ak2];if(!im&&ART_ALL.includes(ak2+'.webp')){c.restore();continue}if(im){const h=a.who==='chewbacca'?96:a.who==='wicket'?54:a.who==='swift_wind'?96:a.who==='twink'?40:76,s=h/im.height;let dy=Math.sin(t*3+a.x)*1.2,rot=0,sx=1,sy=1;if(a.who==='wicket'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t||0,a.follow?55:0);dy=g.dy;rot=g.rot;sx=g.sx;sy=g.sy}c.translate(0,dy);c.rotate(rot);c.scale(sx,sy);c.drawImage(im,-im.width*s/2,-h+2,im.width*s,h)}else D.ally(c,a.who,t);c.restore();
   if(a.sayT>0)bubble(a.x,a.y-(a.who==='chewbacca'?110:90),a.say)}
  // enemies
  for(const e of G.enemies){if(e.x<x0||e.x>x1)continue;c.save();c.translate(e.x,e.y);if(e.dead&&e.squash){c.scale(1.3,Math.max(0.15,1-(e.dt||0)*4));c.globalAlpha=Math.max(0,1-(e.dt||0)*1.5)}else if(e.dead){c.rotate((e.dt||0)*8);c.globalAlpha=Math.max(0,1-(e.dt||0))}
@@ -666,18 +671,86 @@ function drawWorld(){const t=G.t,L=G.L,x0=G.cam.x-100,x1=G.cam.x+viewW+100,theme
   if(b.glow){c.save();c.globalCompositeOperation='lighter';const gx=b.x+b.dir*b.w*(b.type==='skeletor'?0.55:0.4),gy2=b.y-b.dh*(b.type==='skeletor'?0.85:0.5);c.globalAlpha=0.5+0.4*Math.sin(G.t*25);const gg=c.createRadialGradient(gx,gy2,2,gx,gy2,46);gg.addColorStop(0,'#ffffff');gg.addColorStop(0.3,b.type==='skeletor'?'#b06aff':b.type==='freddy_krueger'?'#9aff9a':b.type==='bowser'?'#ffcc33':'#ff4a4a');gg.addColorStop(1,'#0000');c.fillStyle=gg;c.fillRect(gx-50,gy2-50,100,100);c.restore()}const bb=Object.assign({},b,{x:b.x+(b.offsetX||0)});if(b.sx||b.sy){c.translate(bb.x,bb.y);c.scale(b.sx||1,b.sy||1);c.translate(-bb.x,-bb.y)}bossFrame(bb);if(b.spinA){c.translate(bb.x,bb.y-b.h*0.4);c.rotate(b.spinA*b.cdir);c.scale(0.8,0.8);c.translate(-bb.x,-(bb.y-b.h*0.4))}D.boss(c,bb,t);if(b.flash>0&&!D.IMG['art/bosses/'+(bb.art||bb.type)]){c.globalCompositeOperation='lighter';c.globalAlpha=Math.min(1,b.flash*5)*0.6;c.fillStyle='#fff';c.beginPath();c.ellipse(bb.x,bb.y-b.h/2,b.w*0.6,b.h*0.55,0,0,7);c.fill()}c.restore();
   if(b.sayT>0&&b.say&&!b.ghost)bubble(b.x,b.y-b.dh-6,b.say)}
  // player
- drawPlayer();
+ drawBuddy();drawPlayer();
  // shots
  for(const s of G.shots)D.shot(c,s,t);for(const s of G.eshots)D.shot(c,s,t);
  // particles
  for(const q of G.parts){const a=Math.max(0,q.l/q.m);if(q.ring){c.strokeStyle=q.c;c.globalAlpha=a;c.lineWidth=3;c.beginPath();c.arc(q.x,q.y,q.s*(1.2-a),0,TAU);c.stroke();c.globalAlpha=1;continue}
   if(q.add)c.globalCompositeOperation='lighter';c.globalAlpha=q.smoke?a*0.5:a;c.fillStyle=q.c;const r=q.smoke?q.s*(2-a):q.s*a;c.beginPath();c.arc(q.x,q.y,Math.max(0.5,r),0,TAU);c.fill();c.globalAlpha=1;c.globalCompositeOperation='source-over'}
- for(const tx of G.texts){c.globalAlpha=Math.min(1,tx.l*2);c.font=(tx.big?'900 24px':'800 15px')+' "Trebuchet MS",sans-serif';c.textAlign='center';c.lineWidth=4;c.strokeStyle='#000';c.strokeText(tx.s,tx.x,tx.y);c.fillStyle=tx.c;c.fillText(tx.s,tx.x,tx.y);c.globalAlpha=1}}
+ for(const tx of G.texts){c.globalAlpha=Math.min(1,tx.l*2);c.font=(tx.big?'900 24px':'800 15px')+' "Trebuchet MS",sans-serif';c.textAlign='center';c.lineWidth=4;c.strokeStyle='#000';let fs=tx.big?24:15,tw=c.measureText(tx.s).width;if(tw>viewW-16){fs=Math.max(11,Math.floor(fs*(viewW-16)/tw));c.font=(tx.big?'900 ':'800 ')+fs+'px "Trebuchet MS",sans-serif';tw=c.measureText(tx.s).width}const txx=clamp(tx.x,G.cam.x+tw/2+8,G.cam.x+viewW-tw/2-8),txy=Math.max(G.cam.y+fs+6,tx.y);c.strokeText(tx.s,txx,txy);c.fillStyle=tx.c;c.fillText(tx.s,txx,txy);c.globalAlpha=1}}
 /* never draw an ally that is the same character as the hero (no ghost duplicate): swap in a world-mate */
 const SELF_ALLY={rainbow:{rainbow_brite:'twink'},carebear:{care_bear_tenderheart:'grumpy_bear',tenderheart:'grumpy_bear'},shera:{she_ra:'swift_wind'},joe:{snake_eyes:'duke'},chewie:{chewbacca:'wicket'},ewok:{wicket:'chewbacca'}};
-const SELF_ALT={rainbow:['twink','starlite'],carebear:['grumpy_bear','funshine'],shera:['swift_wind','madame_razz'],joe:['duke','scarlett'],chewie:['wicket'],ewok:['chewbacca']};
-function selfSub(w,taken){const m=SELF_ALLY[CH];if(!(m&&m[w]))return w;const alts=SELF_ALT[CH]||[m[w]];return alts.find(a=>!(taken&&taken.includes(a)))||m[w]}
-function allyAmmo(a,dt){if(!a.ammoT||!G.boss||G.boss.dead)return;a.ammoT-=dt;if(a.ammoT<=0){a.ammoT=6;const p=G.p;G.pickups.push({type:CHARS[CH].weapon==='toppings'?['tomato','cheese','jalapeno','salsa'][Math.floor(Math.random()*4)]:'jalapeno',x:a.x+20,y:a.y-90,got:false,pop:1,vy:-420});AU.fx('roar');a.sayT=1.2;a.say='RRWWGH!'}}
+const SELF_ALT={rainbow:['twink','starlite'],carebear:['grumpy_bear','funshine'],shera:['swift_wind','madame_razz'],joe:['duke','scarlett'],chewie:['wicket','lando','leia'],ewok:['chewbacca','lando','leia']};
+const SUB_SAY={twink:'Twink twink! Rainbow Land needs you!',starlite:'Neigh! Hop on the rainbow, friend!',grumpy_bear:'Hmph. Fine, I\'ll help. Go!',funshine:'Sunny side up! Let\'s go!',swift_wind:'For the honor of Grayskull!',madame_razz:'Hocus pocus, focus! I\'ll help!',duke:'Yo Joe! I\'ve got your six!',scarlett:'Cobra won\'t see us coming!',wicket:'Yub nub! Follow me!',lando:'Hey, buddy! I\'ve got your back.',leia:'Help is here. Let\'s move!',chewbacca:'RRAAWWR!'};
+function castAllies(L){const self=SELF_ALLY[CH]||{},alts=SELF_ALT[CH]||[],src=L.allies||[];const taken=new Set(src.map(a=>a.who).filter(w=>!self[w]));const out=[];
+ for(const a of src){if(!self[a.who]){out.push(a);continue}const alt=alts.find(w=>!taken.has(w));const key=a.trigger==='boss_phase'||a.action==='assist';
+  if(alt){taken.add(alt);out.push(Object.assign({},a,{who:alt,orig:a.who,say:SUB_SAY[alt]||''}))}else if(key){const w=alts[0]||self[a.who];out.push(Object.assign({},a,{who:w,orig:a.who,say:SUB_SAY[w]||''}))}}
+ return out}
+/* ---------- Sonic & Tails buddy: the starting helper follows you; tap it to swap who you play ---------- */
+const CHAR_OF={rainbow_brite:'rainbow',care_bear_tenderheart:'carebear',tenderheart:'carebear',she_ra:'shera',snake_eyes:'joe',chewbacca:'chewie',wicket:'ewok'};
+const WHO_OF={rainbow:'rainbow_brite',carebear:'care_bear_tenderheart',shera:'she_ra',joe:'snake_eyes',chewie:'chewbacca',ewok:'wicket'};
+const FORMS={
+ twink:{name:'Twink',weapon:'star',jump:1.08,speed:0.95,dj:1,floaty:1,w:28,h:38,dh:46},
+ starlite:{name:'Starlite',weapon:'star',jump:1.15,speed:1.2,w:46,h:52,dh:80},
+ swift_wind:{name:'Swift Wind',weapon:'sword',jump:1.1,speed:1.15,dj:1,w:46,h:52,dh:84},
+ funshine:{name:'Funshine Bear',weapon:'care',jump:1,speed:0.95,floaty:1,w:30,h:46,dh:70},
+ grumpy_bear:{name:'Grumpy Bear',weapon:'care',jump:1,speed:0.95,floaty:1,w:30,h:46,dh:70},
+ duke:{name:'Duke',weapon:'bullet',jump:1,speed:1.05,w:30,h:58,dh:74},
+ scarlett:{name:'Scarlett',weapon:'bullet',jump:1.05,speed:1.1,w:30,h:58,dh:72},
+ madame_razz:{name:'Madame Razz',weapon:'star',jump:1,speed:0.95,floaty:1,w:30,h:58,dh:72},
+ lando:{name:'Lando',weapon:'bolt',jump:1.02,speed:1.05,w:30,h:58,dh:72},
+ leia:{name:'Princess Leia',weapon:'bolt',jump:1.02,speed:1.05,w:30,h:58,dh:72},
+ r2d2:{name:'R2-D2',weapon:'bolt',jump:0.92,speed:0.9,w:30,h:40,dh:46},
+ chewbacca:{name:'Chewbacca',weapon:'bolt',jump:1.08,speed:1,w:32,h:62,dh:84}};
+const ART_FACE={};
+let PC='taco';
+function playKey(who){return CHAR_OF[who]||('h:'+who)}
+function charOf(k){if(CHARS[k])return CHARS[k];const f=FORMS[(k||'').slice(2)];return f?Object.assign({tag:''},f):CHARS.taco}
+function sizeFor(k){if(k==='chewie')return[32,62];if(k==='ewok')return[28,40];if(k==='taco'||k==='carebear')return[30,46];const f=FORMS[(k||'').slice(2)];if(f)return[f.w,f.h];return[30,58]}
+function drawForm(x,key,a){const who=key.slice(2),f=FORMS[who]||{};const im=D.IMG['art/allies/'+allyKey(who)];
+ if(!im){x.save();if(ART_FACE[who]<0)x.scale(-1,1);D.ally(x,who,a.t);x.restore();return}
+ const h=f.dh||72,s=h/im.height;let dy=0,rot=0;if(a.run){dy=-Math.abs(Math.sin(a.t*13))*3;rot=Math.sin(a.t*13)*0.05}else if(a.air)rot=-0.12;else dy=Math.sin(a.t*3)*1.2;
+ x.save();if((f.face||ART_FACE[who]||1)<0)x.scale(-1,1);x.translate(0,dy);x.rotate(rot+(a.throwT>0?-0.1:0));x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);x.restore()}
+function supportAt(x,feet){for(const s of G.solids)if(x>=s.x&&x<=s.x+s.w&&s.y>=feet-6&&s.y<=feet+48)return true;for(const s of G.plats){if(s.type==='ladder'||s.fallen)continue;if(x>=s.x&&x<=s.x+s.w&&s.y>=feet-6&&s.y<=feet+48)return true}return false}
+function wallAhead(x,feet,dir){for(const s of G.solids){if(x+dir*24>=s.x&&x+dir*24<=s.x+s.w&&s.y<feet-10&&s.y>feet-170&&s.y+s.h>feet-8)return true}return false}
+function makeBuddy(L,p){if(L.mode!=='platform')return null;const i=G.allies.findIndex(a=>a.x<=L.start.x+360&&a.trigger!=='boss_phase'&&a.action!=='assist');if(i<0)return null;const a=G.allies.splice(i,1)[0];
+ const k=playKey(a.who);const [w,h]=sizeFor(k);if(a.gift)G.pickups.push({type:a.gift,x:a.x+20,y:a.y-70,got:false,pop:1,vy:-380});(a.give||[]).forEach((g,j)=>G.pickups.push({type:g,x:a.x+j*24,y:a.y-70,got:false,pop:1,vy:-380}));
+ let seen=0;try{seen=+localStorage.getItem('taco_swap_seen')||0}catch(e){}
+ return{k,x:a.x-w/2,y:(a.y||460)-h,w,h,vx:0,vy:0,face:1,onGround:false,t:0,say:a.say||'',sayT:a.say?3.2:0,hintT:seen>=1?0:7,fly:0,offT:0,cd:0}}
+function buddyWarp(b,p,why){burst(b.x+b.w/2,b.y+b.h/2,12,['#ffffff','#b06aff','#ffe94b'],220,0.4,3);b.x=p.x+p.w/2-p.face*46-b.w/2;b.y=p.y+p.h-b.h;b.vx=p.vx*0.6;b.vy=0;b.fly=p.onGround&&supportAt(b.x+b.w/2,p.y+p.h)?0:1;b.offT=0;burst(b.x+b.w/2,b.y+b.h/2,16,['#ffffff','#7ff7ff','#ff4fd8'],240,0.45,3)}
+function stepBuddy(dt){const b=G.buddy,p=G.p;if(!b||!p)return;b.t+=dt;if(b.sayT>0)b.sayT-=dt;if(b.hintT>0)b.hintT-=dt;if(b.cd>0)b.cd-=dt;
+ const ch=charOf(b.k),maxSp=(TUNE.runMax||330)*1.25*(ch.speed||1);const tx=p.x+p.w/2-p.face*52,cx=b.x+b.w/2,dx=tx-cx;
+ if(p.dead){b.vx*=0.8}
+ if(b.fly){b.vx=clamp(dx*6,-maxSp*1.6,maxSp*1.6);const ty=p.y+p.h-b.h-(p.onGround?0:10);b.vy=clamp((ty-b.y)*7,-900,900);b.x+=b.vx*dt;b.y+=b.vy*dt;b.onGround=false;
+  if(Math.random()<dt*30)G.parts.push({x:b.x+b.w/2+rand(-10,10),y:b.y+b.h,vx:rand(-30,30),vy:rand(20,60),l:0.5,m:0.5,s:4,c:['#ffe94b','#ff4fd8','#7ff7ff'][Math.floor(Math.random()*3)]});
+  if(p.onGround&&Math.abs(dx)<40&&Math.abs(ty-b.y)<20&&supportAt(b.x+b.w/2,b.y+b.h+2)){b.fly=0;b.vy=0}return}
+ const want=Math.abs(dx)<14?0:clamp(dx*5,-maxSp,maxSp);b.vx+=(want-b.vx)*Math.min(1,dt*(b.onGround?10:4));if(Math.abs(b.vx)>20)b.face=b.vx>0?1:-1;else if(Math.abs(p.x+p.w/2-cx)>8)b.face=p.x+p.w/2>cx?1:-1;
+ const feet=b.y+b.h,dir=b.vx>=0?1:-1;
+ if(b.onGround&&!p.dead){const gap=Math.abs(b.vx)>40&&!supportAt(cx+dir*(b.w/2+10),feet),wall=Math.abs(dx)>20&&wallAhead(cx,feet,dir),up=(p.y+p.h)<feet-48&&Math.abs(dx)<180&&p.onGround;
+  if(gap||wall||up){const need=up?feet-(p.y+p.h)+40:wall?150:120;b.vy=-Math.min(1150,Math.sqrt(2*TUNE.gravity*Math.max(90,need)));if(gap)b.vx=dir*Math.max(Math.abs(b.vx),maxSp*0.95);b.onGround=false}}
+ b.vy=Math.min(TUNE.maxFall||1100,b.vy+TUNE.gravity*(ch.floaty&&b.vy>0?0.6:1)*dt);
+ b.prevX=b.x;b.x+=b.vx*dt;colX(b);b.prevY=b.y;b.y+=b.vy*dt;colY(b);
+ if(b.ride&&b.ride.vx)b.x+=b.ride.vx*dt;
+ const sxp=b.x-G.cam.x;if(sxp<-80||sxp>viewW+80||b.y>G.cam.y+VV+40)b.offT+=dt;else b.offT=0;
+ if(b.y>VH+40||Math.abs(dx)>viewW*0.85||b.offT>1.2||(!b.onGround&&b.vy>0&&b.y+b.h>VH-10&&!supportAt(b.x+b.w/2,VH)))buddyWarp(b,p)}
+function drawBuddy(){const b=G.buddy;if(!b)return;c.save();c.translate(b.x+b.w/2,b.y+b.h);if(b.fly){c.globalAlpha=0.85}
+ if(b.hintT>0||b.tapFx>0){const pulse=0.5+0.5*Math.sin(G.t*6);c.save();c.globalCompositeOperation='lighter';c.globalAlpha=0.35+pulse*0.35;const g=c.createRadialGradient(0,-b.h*0.6,4,0,-b.h*0.6,b.h);g.addColorStop(0,'#ffffff');g.addColorStop(0.4,'#ff4fd8');g.addColorStop(1,'#0000');c.fillStyle=g;c.fillRect(-b.h,-b.h*1.6,b.h*2,b.h*2);c.restore()}
+ c.scale(b.face,1);drawHero(c,b.k,{t:G.t+1.3,run:b.onGround&&Math.abs(b.vx)>30,air:!b.onGround,throwT:0,hurt:false,blink:(G.t%3.1)<0.1});c.restore();
+ if(b.hintT>0&&!G.clear)bubble(b.x+b.w/2,b.y-charDH(b.k)-4,(Math.floor(G.t*2)%2?'👆 ':'')+'TAP TO SWAP');else if(b.sayT>0&&b.say)bubble(b.x+b.w/2,b.y-charDH(b.k)-4,b.say)}
+function charDH(k){const f=FORMS[(k||'').slice(2)];if(f)return f.dh-sizeFor(k)[1];return k==='chewie'?24:k==='taco'?20:18}
+function swapBuddy(){const b=G&&G.buddy,p=G&&G.p;if(!b||!p||p.dead||G.clear||G.mode!=='platform'||state!=='play'||b.cd>0||p.capT)return false;
+ const nk=b.k,ok=PC;const pf=p.y+p.h,pcx=p.x+p.w/2,bf=b.y+b.h,bcx=b.x+b.w/2;
+ PC=nk;b.k=ok;const [w,h]=sizeFor(PC);p.w=w;p.h=h;p.x=bcx-w/2;p.y=bf-h;p.vx=0;p.vy=Math.min(p.vy,0);p.inv=Math.max(p.inv||0,0.6);p.dj=0;
+ const [bw,bh]=sizeFor(b.k);b.w=bw;b.h=bh;b.x=pcx-bw/2;b.y=pf-bh;b.vx=b.vy=0;b.fly=0;b.cd=0.35;b.hintT=0;b.sayT=0;b.face=p.face;
+ for(const [x,y] of[[bcx,bf-30],[pcx,pf-30]]){burst(x,y,26,['#ffffff','#ff4fd8','#7ff7ff','#ffe94b'],320,0.55,5);for(let i=0;i<10;i++)G.parts.push({x:x+rand(-20,20),y:y+rand(-20,20),vx:rand(-60,60),vy:-rand(20,80),l:0.7,m:0.7,s:10,c:'#ffffffaa',smoke:1,g:-40})}
+ AU.fx('star');text(p.x+p.w/2,p.y-34,'NOW PLAYING: '+charOf(PC).name.toUpperCase(),'#7ff7ff',1);shake(4);
+ try{localStorage.setItem('taco_swap_seen',String((+localStorage.getItem('taco_swap_seen')||0)+1))}catch(e){}
+ G.swaps=(G.swaps||0)+1;return true}
+function tapWorld(cx,cy){if(!G||!G.buddy||state!=='play')return false;const wx=cx/S+G.cam.x,wy=(cy-gameTop)/S+G.cam.y,b=G.buddy;const top=b.y-charDH(b.k)-6,pad=18;
+ if(wx>=b.x-pad&&wx<=b.x+b.w+pad&&wy>=top-pad&&wy<=b.y+b.h+pad)return swapBuddy();return false}
+
+function selfSub(w,taken){/* legacy */const m=SELF_ALLY[CH];if(!(m&&m[w]))return w;const alts=SELF_ALT[CH]||[m[w]];return alts.find(a=>!(taken&&taken.includes(a)))||m[w]}
+function allyAmmo(a,dt){if(!a.ammoT||!G.boss||G.boss.dead)return;a.ammoT-=dt;if(a.ammoT<=0){a.ammoT=6;const p=G.p;G.pickups.push({type:charOf(PC).weapon==='toppings'?['tomato','cheese','jalapeno','salsa'][Math.floor(Math.random()*4)]:'jalapeno',x:a.x+20,y:a.y-90,got:false,pop:1,vy:-420});AU.fx('roar');a.sayT=1.2;a.say='RRWWGH!'}}
 function allyKey(w){return{tenderheart:'care_bear_tenderheart'}[w]||w}
 function circ(x,y,r,f){c.beginPath();c.arc(x,y,r,0,TAU);c.fillStyle=f;c.fill()}
 function b0vis(b){return b.y>-300}
@@ -693,7 +766,7 @@ function drawPlayer(){const p=G.p;if(p.dead&&G.mode!=='bike'){return}if(p.inv>0&
  if(p.star>0){c.save();c.globalCompositeOperation='lighter';const g=c.createRadialGradient(0,-24,4,0,-24,48);g.addColorStop(0,'hsla('+(G.t*400%360)+',100%,70%,0.6)');g.addColorStop(1,'#0000');c.fillStyle=g;c.fillRect(-50,-80,100,90);c.restore()}
  if(p.shield){c.save();c.globalCompositeOperation='lighter';c.strokeStyle='#7ff7ffaa';c.lineWidth=3;c.beginPath();c.arc(0,-26,34+Math.sin(G.t*8)*2,0,TAU);c.stroke();c.restore()}
  const sq=p.pound===2?1.2:1;c.scale(p.face*sq,1/sq);
- drawHero(c,CH,{t:G.t,run:p.onGround&&Math.abs(p.vx)>30,air:!p.onGround,throwT:p.throwT,hurt:p.inv>1,blink:(G.t%3.5)<0.1});
+ drawHero(c,PC,{t:G.t,run:p.onGround&&Math.abs(p.vx)>30,air:!p.onGround,throwT:p.throwT,hurt:p.inv>1,blink:(G.t%3.5)<0.1});
  c.restore()}
 function drawSarlacc(h){const cx=h.x+h.w/2,y=h.y,t=G.t;const pull=h.pull||0;const im=D.IMG['art/props/sarlacc'];
  if(im){const w=Math.max(h.w*1.25,170),s=w/im.width,hh=im.height*s;const gy0=y;c.save();c.translate(cx,gy0-4);c.scale(1+pull*0.06+Math.sin(t*3)*0.01,1+pull*0.08);c.drawImage(im,-w/2,0,w,hh);c.restore();c.save();c.strokeStyle='#9a6a4a';c.lineWidth=5;c.lineCap='round';for(let k=0;k<4;k++){const side=k<2?-1:1,len=10+pull*80+Math.sin(t*2+k)*8;c.beginPath();c.moveTo(cx+side*(10+k%2*8),y);c.quadraticCurveTo(cx+side*(26+k*6),y-len*0.7,cx+side*(18+k*8)+Math.sin(t*3+k)*10,y-len);c.stroke()}c.restore();return}
@@ -715,7 +788,7 @@ function drawHUD(){const p=G.p;
  if(G.boss&&!G.boss.dead){const b=G.boss,w=Math.min(420,viewW-40),x=(viewW-w)/2,y=VV-34;c.fillStyle='#000a';D.rr(c,x-4,y-18,w+8,32,8);c.fill();c.fillStyle='#400';c.fillRect(x,y,w,10);const g=c.createLinearGradient(x,0,x+w,0);g.addColorStop(0,'#ff2a2a');g.addColorStop(1,'#ffcc33');c.fillStyle=g;c.fillRect(x,y,w*Math.max(0,b.hp/b.max),10);c.font='800 12px "Trebuchet MS"';c.textAlign='center';c.fillStyle='#fff';c.fillText(b.name.toUpperCase(),viewW/2,y-4)}
  if(G.mode==='bike'){const f=clamp(p.x/G.L.goal.x,0,1),w=Math.min(300,viewW-160),x=(viewW-w)/2,y=VV-18;c.fillStyle='#0008';c.fillRect(x,y,w,6);c.fillStyle='#7ff7ff';c.fillRect(x,y,w*f,6);c.fillStyle='#fff';c.beginPath();c.arc(x+w*f,y+3,5,0,TAU);c.fill()}}
 function drawTopBand(){const h=gameTop,w=W;const s=Math.min(clamp(h/62,0.7,1.25),(w-136)/(G.p.maxHp*22+190));c.save();c.translate(8,Math.max(4,h-60*s-6));c.scale(s,s);drawTopBandAt(0,0,(w-130)/s);c.restore()}
-function drawTopBandAt(x,y,maxW){const p=G.p,ch=CHARS[CH];c.save();c.translate(x,y);
+function drawTopBandAt(x,y,maxW){const p=G.p,ch=charOf(PC);c.save();c.translate(x,y);
  for(let i=0;i<p.maxHp;i++){c.save();c.translate(12+i*22,14);D.heart(c,0,0,8,i<p.hp?'#ff2a5a':'#ffffff33');c.restore()}
  c.font='800 14px "Trebuchet MS"';c.textAlign='left';c.lineWidth=3;c.strokeStyle='#000';const st=(s,xx,yy,col='#fff')=>{c.strokeText(s,xx,yy);c.fillStyle=col;c.fillText(s,xx,yy)};
  st('x'+run.lives,p.maxHp*22+8,19,'#5ad84a');st(String(run.score).padStart(7,'0'),4,44,'#ffe94b');st('● '+run.coins,90,44,'#ffcc33');
@@ -727,7 +800,7 @@ function drawTopBandAt(x,y,maxW){const p=G.p,ch=CHARS[CH];c.save();c.translate(x
  c.restore()}
 /* ---------------- update loop ---------------- */
 function updateCam(dt){const p=G.p;const look=G.mode==='bike'?viewW*0.28:viewW*(p.face>0?(portrait?0.38:0.33):(portrait?0.62:0.55));let tx=p.x+p.w/2-look;if(G.mode==='bike')tx=p.x-viewW*0.25;
- if(G.arena&&G.boss&&!G.boss.dead&&b0vis(G.boss)&&viewW<(G.arena.x1-G.arena.x0)){const px=p.x+p.w/2,bx=G.boss.x,reserve=portrait?0:viewW*0.2;tx=clamp((px+bx)/2-(viewW-reserve)/2,px-viewW+reserve+70,px-70)}
+ if(G.arena&&G.boss&&!G.boss.dead&&b0vis(G.boss)&&viewW<(G.arena.x1-G.arena.x0)){const px=p.x+p.w/2,bx=G.boss.x,reserve=portrait?0:viewW*0.2;tx=portrait?clamp(Math.min((px+bx)/2-viewW/2,px-viewW*0.25),px-viewW+70,px-70):clamp((px+bx)/2-(viewW-reserve)/2,px-viewW+reserve+70,px-70)}
  G.cam.x=lerp(G.cam.x,tx,Math.min(1,dt*(G.mode==='bike'?20:6)));if(G.arena){G.cam.x=clamp(G.cam.x,G.arena.x0,Math.max(G.arena.x0,G.arena.x1-viewW))}
  G.cam.x=clamp(G.cam.x,0,Math.max(0,G.L.width-viewW));G.cam.minX=G.cam.x;
  const ty=clamp(p.y+p.h/2-VV*0.55,0,VH-VV);G.cam.y=VV>=VH?0:lerp(G.cam.y,ty,Math.min(1,dt*4))}
@@ -735,7 +808,7 @@ function update(dt){G.t+=dt;const p=G.p;if(G.banner)G.banner.t-=dt;if(G.flash>0)
  if(p.inv>0)p.inv-=dt;if(p.star>0)p.star-=dt;if(p.throwT>0)p.throwT-=dt;if(p.cool>0)p.cool-=dt;
  if(p.dead){G.deadT-=dt;if(G.deadT<=0)respawn()}
  if(G.mode==='bike'){stepBike(dt)}
- else if(!p.dead&&!G.clear){if(!p.capT)stepPlayer(dt);if(inp.throwPressed||(inp.throw&&CHARS[CH].weapon!=='toppings'&&p.cool<=0)||(inp.throw&&p.cool<=0))doThrow()}
+ else if(!p.dead&&!G.clear){if(!p.capT)stepPlayer(dt);stepBuddy(dt);if(inp.throwPressed||(inp.throw&&charOf(PC).weapon!=='toppings'&&p.cool<=0)||(inp.throw&&p.cool<=0))doThrow()}
  else if(G.clear){p.vx*=0.9;p.x+=60*dt}
  stepWorld(dt);
  if(G.mode!=='bike')stepEnemies(dt);
@@ -755,7 +828,7 @@ function frame(ts){const dt=Math.min(0.05,last?(ts-last)/1000:0);last=ts;tGlobal
   if(!(G&&G.fl))render(dt)}catch(e){console.error(e);window.__taco.err=String(e&&e.stack||e)}
  requestAnimationFrame(frame)}
 /* tap the ammo box to switch topping; Q key too */
-function cycleTop(){if(!run||CHARS[CH].weapon!=='toppings')return;const have=TOPS.filter(t=>run.ammo[t]>0);if(!have.length)return;const i=have.indexOf(run.sel);run.sel=have[(i+1)%have.length];AU.fx('coin')}
+function cycleTop(){if(!run||!G||charOf(PC).weapon!=='toppings')return;const have=TOPS.filter(t=>run.ammo[t]>0);if(!have.length)return;const i=have.indexOf(run.sel);run.sel=have[(i+1)%have.length];AU.fx('coin')}
 addEventListener('keydown',e=>{if(e.code==='KeyQ'||e.code==='KeyC')cycleTop()});
 cv.addEventListener('touchstart',e=>{if(state!=='play'||!G||G.fl||!HUDR.ammo)return;for(const t of e.changedTouches){const r=HUDR.ammo;let x=t.clientX,y=t.clientY;if(portrait){const s=Math.min(clamp(gameTop/62,0.7,1.25),(W-136)/(G.p.maxHp*22+190));x=(x-8)/s;y=(y-Math.max(4,gameTop-60*s-6))/s}else{x=x/S-10;y=(y-gameTop)/S-10}if(x>=r.x-0&&x<=r.x+r.w&&y>=r.y&&y<=r.y+r.h+10){cycleTop();TOUCH.delete(t.identifier)}}},{passive:true});
 $('bPause').addEventListener('click',e=>{e.preventDefault();if(state==='play')pauseGame();else if(state==='pause')resumeGame()});
@@ -768,5 +841,5 @@ document.addEventListener('visibilitychange',()=>{if(document.hidden&&state==='p
  if(q.get('play')){const ch=q.get('char')||'taco';newRun(ch,0);const i=run.list.indexOf(q.get('play'));if(i>=0)run.idx=i;else{run.list=[q.get('play')];run.idx=0}playCurrent()}else toTitle();
  window.__taco.ready=true})();
 const FLIGHT_ALIAS={'xw-1':'xwing','xw-2':'xwing','falcon-1':'falcon'};
-Object.defineProperties(window.__taco,{state:{get:()=>state},run:{get:()=>run},G:{get:()=>G}});Object.assign(window.__taco,{key:(k,d)=>{K[k]=d?1:0},hold:(k,ms)=>{K[k]=1;setTimeout(()=>{K[k]=0},ms||500)},tap:(k)=>{K[k]=1;setTimeout(()=>{K[k]=0},90)},spawnEnemy:e=>spawnEnemy(e),CHARS,inp,startLevel:(id,ch)=>{newRun(ch||'taco',0);run.list=[id];playCurrent()},LEVELS:()=>LEVELS,MISSIONS:()=>MISSIONS,gameOver:()=>gameOver(),levelClear:()=>levelClear()});
+Object.defineProperties(window.__taco,{viewW:{get:()=>viewW},PC:{get:()=>PC},S:{get:()=>S},gameTop:{get:()=>gameTop},state:{get:()=>state},run:{get:()=>run},G:{get:()=>G}});Object.assign(window.__taco,{key:(k,d)=>{K[k]=d?1:0},hold:(k,ms)=>{K[k]=1;setTimeout(()=>{K[k]=0},ms||500)},tap:(k)=>{K[k]=1;setTimeout(()=>{K[k]=0},90)},spawnEnemy:e=>spawnEnemy(e),CHARS,inp,startLevel:(id,ch)=>{newRun(ch||'taco',0);run.list=[id];playCurrent()},LEVELS:()=>LEVELS,MISSIONS:()=>MISSIONS,gameOver:()=>gameOver(),levelClear:()=>levelClear(),kill:w=>killPlayer(w||'pit'),swap:()=>swapBuddy(),tapAt:(x,y)=>tapWorld(x,y),buddy:()=>G&&G.buddy,hasGround:x=>hasGround(x)});
 })();
