@@ -29,3 +29,7 @@ canvas{position:fixed;inset:0;width:100vw;height:100dvh;display:block}
 [hidden]{display:none!important}
 @media (max-width:560px){.chars{grid-template-columns:repeat(2,1fr);gap:8px}.char{min-height:0;padding:5px;font-size:13px}.char canvas,.char img{height:92px}.char small{font-size:10.5px;line-height:1.25}}
 @media (max-height:480px){.chars{grid-template-columns:repeat(4,1fr)}.char{min-height:0}.char canvas,.char img{height:84px}.char small{font-size:10.5px}}
+#pad.dimmed #bThrow,#pad.dimmed #bJump{opacity:.55}
+body.uiopen #pad,body.uiopen #hud{visibility:hidden}
+#pad .big{opacity:.85}
+@media (max-height:480px){#ui>.scr{max-height:calc(100vh - 14px);max-height:calc(100dvh - 14px);padding:8px 14px 0}#ui>.scr h2{margin:2px 0 6px}#ui>.scr .chars{margin:6px 0}#ui>.scr button[data-a=title],#ui>.scr button[data-a=select],#ui>.scr button[data-a=back]{position:sticky;bottom:6px;z-index:3;margin:6px auto 8px;min-height:44px;padding:10px 20px}#ui>.scr ul,#ui>.scr ol{margin:4px 0;line-height:1.3}}

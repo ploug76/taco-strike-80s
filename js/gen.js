@@ -8,10 +8,10 @@ const LIST=[
  ['w4-1','cobra','Jungle Strike',4,null],['w4-2','cobra','Cobra Island Base',4,'cobra_commander'],
  ['w5-1','endor','Forest Moon of Endor',5,null],['w5-2','endor','Speeder Bike Chase',5,'bike'],
  ['w6-1','ewok','Bright Tree Village',6,null],['w6-2','ewok','Rope Bridge Rumble',6,'at_st'],
- ['w7-1','tatooine','Dune Sea & the Sarlacc',7,null],['w7-2','tatooine',"Jabba's Sail Barge",7,'jabba'],
+ ['w7-1','tatooine','Dune Sea & the Sarlacc',7,null],['w7-2','tatooine',"Helmet's Landing Zone",7,'big_helmet'],
  ['xw-1','space','X-wing: Battle of Yavin',8,'flight'],
  ['falcon-1','space','Millennium Falcon: The Falcon Run (Death Star II)',8,'flight'],
- ['final','final','Cobra-Horde Doomsday Machine',9,'final'],
+ ['final','final','Gauntlet of Doom',9,'skeletor'],
 ];
 const POOL={rainbow:['murky','lurky','gloom_cloud'],carealot:['beastly','shreeky','gloom_cloud'],etheria:['horde_trooper','catra','horde_trooper'],cobra:['cobra_trooper','bat','hiss_tank','cobra_trooper'],endor:['scout_trooper','stormtrooper'],ewok:['scout_trooper','stormtrooper'],tatooine:['tusken','womp_rat','gamorrean'],final:['cobra_trooper','horde_trooper','bat','stormtrooper']};
 const ALLY={rainbow:['rainbow_brite','twink'],carealot:['tenderheart','funshine'],etheria:['she_ra','swift_wind'],cobra:['duke','snake_eyes'],endor:['wicket','chewbacca'],ewok:['wicket','chewbacca'],tatooine:['chewbacca'],final:['chewbacca','she_ra','duke','rainbow_brite']};
