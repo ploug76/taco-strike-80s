@@ -26,8 +26,8 @@ function resize(){W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,2)
  viewW=W/S;layoutPad()}
 function layoutPad(){const pad=$('pad'),bj=$('bJump'),bt=$('bThrow'),hint=$('swipeHint');
  if(portrait){const top=gameTop+gameH,ph=H-top;pad.style.top=top+'px';pad.style.height=ph+'px';const sz=Math.round(clamp(ph*0.36,84,120));[bj,bt].forEach(b=>{b.style.width=b.style.height=sz+'px'});
-  bj.style.right='18px';bj.style.bottom=Math.round(ph*0.22)+'px';bt.style.right=(18+sz+16)+'px';bt.style.bottom=Math.round(ph*0.22+sz*0.45)+'px';hint.style.top='14px';hint.style.display='';const bs=$('bSpec');if(bs){const z=Math.round(sz*0.78);bs.style.width=bs.style.height=z+'px';bs.style.right=(18+sz*2+30)+'px';bs.style.bottom=Math.round(ph*0.22+sz*0.1)+'px'}}
- else{pad.style.top='auto';pad.style.height='0';const sz=Math.round(clamp(H*0.2,70,92));[bj,bt].forEach(b=>{b.style.width=b.style.height=sz+'px'});bj.style.right='10px';bj.style.bottom='12px';bt.style.right=(10+Math.round(sz*0.18))+'px';bt.style.bottom=(12+sz+10)+'px';hint.style.display='none';const bs=$('bSpec');if(bs){const z=Math.round(sz*0.8);bs.style.width=bs.style.height=z+'px';bs.style.right=(10+sz+14)+'px';bs.style.bottom='12px'}}}
+  /* Oct 30: JUMP bottom-right; THROW bottom-left, SPECIAL beside it */[bj,bt,$('bSpec')].forEach(b=>{if(b){b.style.left='';b.style.right=''}});bj.style.right='18px';bj.style.bottom=Math.round(ph*0.22)+'px';bt.style.left='18px';bt.style.bottom=Math.round(ph*0.22)+'px';hint.style.top='14px';hint.style.display='';const bs=$('bSpec');if(bs){const z=Math.round(sz*0.78);bs.style.width=bs.style.height=z+'px';bs.style.left=(18+sz+16)+'px';bs.style.bottom=Math.round(ph*0.22+sz*0.1)+'px'}}
+ else{pad.style.top='auto';pad.style.height='0';const sz=Math.round(clamp(H*0.2,70,92));[bj,bt].forEach(b=>{b.style.width=b.style.height=sz+'px'});[bj,bt,$('bSpec')].forEach(b=>{if(b){b.style.left='';b.style.right=''}});bj.style.right='10px';bj.style.bottom='12px';bt.style.left='10px';bt.style.bottom='12px';hint.style.display='none';const bs=$('bSpec');if(bs){const z=Math.round(sz*0.8);bs.style.width=bs.style.height=z+'px';bs.style.left=(10+sz+14)+'px';bs.style.bottom='12px'}}}
 addEventListener('resize',resize);resize();
 /* ---------------- audio ---------------- */
 const AU={ctx:null,master:null,music:null,sfx:null,muted:!!save.muted,cur:null,timer:null,
@@ -211,7 +211,14 @@ function postMove(dt,noRide){const p=G.p;if(p.ride&&!noRide&&(p.ride.dxm||p.ride
  if(p.x<G.cam.minX)p.x=G.cam.minX,p.vx=Math.max(0,p.vx);if(G.arena){if(p.x<G.arena.x0)p.x=G.arena.x0;if(p.x+p.w>G.arena.x1)p.x=G.arena.x1-p.w}
  if(p.x+p.w>G.L.width)p.x=G.L.width-p.w;
  if(p.onGround&&Math.abs(p.vx)>250&&Math.random()<0.3)dust(p.x+p.w/2,p.y+p.h,1);
- if(p.y>600)killPlayer('pit')}
+ if(G.mode==='platform'&&p.onGround&&!p.dead&&(!p.ride||p.ride.type==='ground'||p.ride.type==='solid')&&rfOk(p.x,p.w))p.rfSafe={x:p.x,y:p.y};
+ if(p.y>600){if(G.mode==='platform'&&!p.dead&&!G.clear&&(p.inv>0||p.iframes>0)&&rfRestore(p))return;killPlayer('pit')}}
+/* respawn fix (Oct 30): a pit fall while blinking costs nothing (back on solid ground); respawns back up off pit edges */
+function rfG(x){return G.solids.some(s=>(s.type==='ground'||s.type==='solid')&&x>=s.x&&x<=s.x+s.w&&s.y<VH)}
+function rfOk(x,w){return rfG(x+2)&&rfG(x+w-2)}
+function rfDist(x,w,d){let k=0;while(k<600&&rfOk(x+d*(k+4),w))k+=4;return k}
+function rfNudge(x,w,pref){const need=w*1.5;for(const d of (pref?[pref,-pref]:[1,-1])){const k=rfDist(x,w,d);if(k<need){const nx=x-d*(need-k);if(rfOk(nx,w))x=nx}}return x}
+function rfRestore(p){const s=p.rfSafe||G.respawn;if(!s)return false;let x=s.x;if(!rfOk(x,p.w))x=safeX(x,p.w);x=rfNudge(x,p.w,Math.sign(p.x-x)||1);if(!rfOk(x,p.w))return false;p.x=x;p.y=findGround(x+p.w/2)-p.h-4;p.vx=0;p.vy=0;p.pound=0;p.inv=Math.max(p.inv,1);p.iframes=Math.max(p.iframes||0,1);return true}
 function poundAt(x,y,r){shake(9);ring(x,y,'#ffffff',r);dust(x,y,14);AU.fx('stomp');for(const e of G.enemies){if(!e.dead&&Math.abs(e.x-x)<r&&Math.abs(e.y-y)<60){e.hp-=TUNE.poundDamage||2;e.flash=0.2;if(e.hp<=0){killEnemy(e,Math.sign(e.x-x)*250);run.score+=e.sc}}}if(G.boss&&!G.boss.dead&&Math.abs(G.boss.x-x)<G.boss.w/2+r&&Math.abs(G.boss.y-y)<80)damageBoss(TUNE.poundDamage||2,x,y)}
 function dust(x,y,n){for(let i=0;i<n;i++)G.parts.push({x:x+rand(-10,10),y,vx:rand(-60,60),vy:rand(-80,-20),l:0.45,m:0.45,s:rand(3,7),c:G.theme==='tatooine'?'#e8c890':G.theme==='carealot'?'#ffffff':'#d8c8b8',add:false,g:-50,smoke:1})}
 function hurtPlayer(src){const p=G.p;if(p.inv>0||p.star>0||p.dead||G.clear)return;if(p.shield){p.shield=0;p.inv=1;AU.fx('boss_hit');ring(p.x+p.w/2,p.y+p.h/2,'#7ff7ff',50);text(p.x,p.y-20,'SHIELD BLOCK!','#7ff7ff');return}p.hp--;run.hp=p.hp;p.inv=1.6;AU.fx('hurt');shake(10);hitstop(0.06);burst(p.x+p.w/2,p.y+p.h/2,16,['#ff4a4a','#ffffff'],260,0.5,4);
@@ -219,7 +226,7 @@ function hurtPlayer(src){const p=G.p;if(p.inv>0||p.star>0||p.dead||G.clear)retur
 function killPlayer(why){const p=G.p;if(p.dead||G.clear)return;p.dead=true;G.deadT=2.2;run.lives--;AU.fx(why==='sarlacc'?'sarlacc':'die');shake(16);burst(p.x+p.w/2,p.y+p.h/2,40,['#ffe94b','#ff4a4a','#5ad84a','#ffffff'],400,1,5);
  if(why==='sarlacc')text(p.x,p.y-30,'SWALLOWED BY THE SARLACC!','#ffcc66',1);else if(why==='pit')text(p.x,G.cam.y+300,'OOPS!','#fff',1)}
 function respawn(){const p=G.p;if(run.lives<=0){if(G.vm)return vEnd('villain','lives');return gameOver()}p.dead=false;p.captured=null;p.capT=0;p.pound=0;p.iframes=0;p.hurtLock=0;p.hp=p.maxHp;run.hp=p.hp;p.x=G.respawn.x;p.y=G.respawn.y;if(G.vm&&G.boss&&!G.boss.dead&&!(G.vm.side>0)&&p.x+p.w/2>G.boss.x-420){p.x=safeX(Math.max(G.vm.startX,G.boss.x-620),p.w);p.y=findGround(p.x+p.w/2)-p.h-4;G.vm.side=-1}p.vx=p.vy=0;p.inv=2.5;p.iframes=2.5;p.spawnT=1;if(G.mode==='bike'){p.y=280;p.vx=TUNE.bikeSpeed}
- else if(G.mode==='platform'){const sx=safeX(p.x,p.w);if(sx!==p.x||!hasGround(p.x+p.w/2)){p.x=sx;p.y=findGround(sx+p.w/2)-p.h-4}
+ else if(G.mode==='platform'){const sx=safeX(p.x,p.w);if(sx!==p.x||!hasGround(p.x+p.w/2)){p.x=sx;p.y=findGround(sx+p.w/2)-p.h-4}if(rfOk(p.x,p.w)){const nx=rfNudge(p.x,p.w);if(nx!==p.x){p.x=nx;p.y=findGround(nx+p.w/2)-p.h-4}}p.rfSafe=null;
   if(!G.vm){G.cam.x=clamp(p.x+p.w/2-viewW*(portrait?0.38:0.33),0,Math.max(0,G.L.width-viewW));G.cam.minX=G.cam.x;G.cam.y=VV>=VH?0:clamp(p.y+p.h/2-VV*0.55,0,VH-VV)}}
  G.enemies.forEach(e=>{if(e.dead&&!e.gone&&Math.abs(e.x0-p.x)>600){}});G.eshots=[];G.marks=[];G.reach=[];p.holdT=0;if(G.buddy)buddyWarp(G.buddy,p);
  if(G.boss&&!G.boss.dead&&!G.vm){G.enemies.forEach(e=>{if(!e.dead&&G.arena&&e.x>G.arena.x0-100&&e.x<G.arena.x1+100)e.gone=true});G.boss=null;G.arena=null;G.bossOn=false;G.tint=0;G.dim=0;AU.play(G.L.music||G.theme)}}
