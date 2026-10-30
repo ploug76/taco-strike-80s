@@ -598,11 +598,22 @@ function portrait1(cc,key){const si=D.IMG['art/select/'+SEL[key]];if(si&&key!=='
 /* ---------------- rendering ---------------- */
 const HERO_FRAMES={joe:'art/players/snake_eyes'};
 const HERO_ART={rainbow:'art/allies/rainbow_brite',carebear:'art/allies/care_bear_tenderheart',shera:'art/allies/she_ra',joe:'art/allies/snake_eyes',chewie:'art/allies/chewbacca',ewok:'art/allies/wicket'};
+/* leg check (Grey Heart, Oct 2026): render-only gait. Phase from distance actually run, amplitude eases so legs settle to the art pose.
+   Single-pose hero art gets cutout legs (each leg below the crotch line swung about its hip); 2-frame heroes pick frames by distance. */
+function heroGait(o,ok){const now=performance.now(),dt=o._gt?Math.min(0.1,(now-o._gt)/1000):0;o._gt=now;if(o._gp===undefined){o._gp=0;o._ga=0;o._lx=o.x}
+ const d=Math.abs(o.x-o._lx);o._lx=o.x;const mv=ok&&d>0.2&&d<60;o._ga+=((mv?1:0)-o._ga)*Math.min(1,dt*10);if(mv)o._gp+=d/45*Math.PI;else if(o._ga<0.03){o._ga=0;o._gp=Math.round(o._gp/Math.PI)*Math.PI}
+ return o}
+const HRIG={'art/allies/rainbow_brite':{cy:146,cx:62,p:[50,80],x:[16,112],A:0.3},'art/allies/she_ra':{cy:158,cx:60,p:[42,80],x:[26,104],A:0.3},
+ 'art/allies/chewbacca':{cy:160,cx:70,p:[45,105],x:[0,140],A:0.24},'art/allies/care_bear_tenderheart':{cy:164,cx:54,p:[35,75],x:[0,108],A:0.3}};
+function heroCut(x,im,R,w,h,oy,ph,amp){const k=w/im.width,ov=im.height*0.035,a=amp*R.A*Math.sin(ph),cw=Math.cos(ph),lu=0.03*amp*h;
+ const leg=(x0,x1,px,ang,lift)=>{x.save();x.translate(-w/2+px*k,oy+R.cy*k-lift);x.rotate(ang);x.translate(-px*k,-R.cy*k);x.beginPath();x.rect(x0*k,(R.cy-ov)*k,(x1-x0)*k,(im.height-R.cy+ov)*k);x.clip();x.drawImage(im,0,0,w,h);x.restore()};
+ leg(R.x[0],R.cx,R.p[0],a,lu*Math.max(0,-cw));leg(R.cx,R.x[1],R.p[1],-a,lu*Math.max(0,cw));
+ x.save();x.beginPath();x.rect(-w/2,oy,w,h);x.rect(-w/2+R.x[0]*k,oy+R.cy*k,(R.x[1]-R.x[0])*k,(im.height-R.cy)*k);x.clip('evenodd');x.drawImage(im,-w/2,oy,w,h);x.restore()}
 function drawHero(x,key,a,menu){if(key&&key.startsWith('h:'))return drawForm(x,key,a);
- if(key==='taco'&&D.IMG['art/hero/taco']){const fr=a.hurt?'taco_hurt':a.air?'taco_jump':a.throwT>0?'taco_throw':a.run?(Math.floor(a.t*10)%2?'taco_run1':'taco_run2'):'taco';const im=D.IMG['art/hero/'+fr]||D.IMG['art/hero/taco'];const h=64,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
- const hf=HERO_FRAMES[key];if(hf&&D.IMG[hf]){const fr=a.hurt?'_hurt':a.air?'_jump':a.throwT>0?'_throw':a.run?(Math.floor(a.t*10)%2?'_run1':'_run2'):'';const im=D.IMG[hf+fr]||D.IMG[hf];const h=74,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
- const ak=HERO_ART[key];const im=ak&&D.IMG[ak];if(im){const h=key==='chewie'?84:key==='ewok'?52:72,s=h/im.height;let dy=0,rot=0,sx=1,sy=1;if(key==='ewok'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t,a.run?55:0);dy=g.dy||0;rot=g.rot||0;sx=g.sx||1;sy=g.sy||1}else if(a.run){dy=-Math.abs(Math.sin(a.t*13))*3;rot=Math.sin(a.t*13)*0.05}
-  x.save();x.translate(0,dy);x.rotate(rot+(a.throwT>0?-0.08:0));x.scale(sx,sy);x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);x.restore();return}
+ if(key==='taco'&&D.IMG['art/hero/taco']){const fr=a.hurt?'taco_hurt':a.air?'taco_jump':a.throwT>0?'taco_throw':a.run||a.amp>0.5?(Math.floor((a.ph!==undefined?a.ph/Math.PI:a.t*10))%2?'taco_run1':'taco_run2'):'taco';const im=D.IMG['art/hero/'+fr]||D.IMG['art/hero/taco'];const h=64,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
+ const hf=HERO_FRAMES[key];if(hf&&D.IMG[hf]){const fr=a.hurt?'_hurt':a.air?'_jump':a.throwT>0?'_throw':a.run||a.amp>0.5?(Math.floor((a.ph!==undefined?a.ph/Math.PI:a.t*10))%2?'_run1':'_run2'):'';const im=D.IMG[hf+fr]||D.IMG[hf];const h=74,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
+ const ak=HERO_ART[key];const im=ak&&D.IMG[ak];if(im){const h=key==='chewie'?84:key==='ewok'?52:72,s=h/im.height;let dy=0,rot=0,sx=1,sy=1;if(key==='ewok'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t,a.run?55:0);dy=g.dy||0;rot=g.rot||0;sx=g.sx||1;sy=g.sy||1}else if(a.ph!==undefined&&HRIG[ak]){dy=-Math.abs(Math.sin(a.ph))*3*a.amp;rot=Math.sin(a.ph)*0.05*a.amp}else if(a.run){dy=-Math.abs(Math.sin(a.t*13))*3;rot=Math.sin(a.t*13)*0.05}
+  x.save();x.translate(0,dy);x.rotate(rot+(a.throwT>0?-0.08:0));x.scale(sx,sy);if(a.ph!==undefined&&HRIG[ak]&&a.amp>0.01&&!a.air)heroCut(x,im,HRIG[ak],im.width*s,h,-h+2,a.ph,a.amp);else x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);x.restore();return}
  if(key==='ewok')return D.ewok(x,a,0.85,'#7a5a3a');D.drawChar(x,key,a)}
 function bossFrame(b){const k=b.art0;if(!k)return;const has=f=>D.IMG['art/bosses/'+k+f];let f='';
  if(b.dead)f='_defeat';else if(b.hurtT>0||b.stun>0||b.state==='teeter'||b.state==='blind'||b.state==='dizzy'||b.state==='stuck'||b.state==='floored')f='_hurt';else if(b.atkT>0||b.state==='tell')f='_attack';b.art=has(f)?k+f:has('')?k:null}
@@ -742,7 +753,7 @@ function stepBuddy(dt){const b=G.buddy,p=G.p;if(!b||!p)return;b.t+=dt;if(b.sayT>
  if(b.y>VH+40||Math.abs(dx)>viewW*0.85||b.offT>1.2||(!b.onGround&&b.vy>0&&b.y+b.h>VH-10&&!supportAt(b.x+b.w/2,VH)))buddyWarp(b,p)}
 function drawBuddy(){const b=G.buddy;if(!b)return;c.save();c.translate(b.x+b.w/2,b.y+b.h);if(b.fly){c.globalAlpha=0.85}
  if(b.hintT>0||b.tapFx>0){const pulse=0.5+0.5*Math.sin(G.t*6);c.save();c.globalCompositeOperation='lighter';c.globalAlpha=0.35+pulse*0.35;const g=c.createRadialGradient(0,-b.h*0.6,4,0,-b.h*0.6,b.h);g.addColorStop(0,'#ffffff');g.addColorStop(0.4,'#ff4fd8');g.addColorStop(1,'#0000');c.fillStyle=g;c.fillRect(-b.h,-b.h*1.6,b.h*2,b.h*2);c.restore()}
- c.scale(b.face,1);drawHero(c,b.k,{t:G.t+1.3,run:b.onGround&&Math.abs(b.vx)>30,air:!b.onGround,throwT:0,hurt:false,blink:(G.t%3.1)<0.1});c.restore();
+ heroGait(b,b.onGround);c.scale(b.face,1);drawHero(c,b.k,{ph:b._gp,amp:b._ga,t:G.t+1.3,run:b.onGround&&Math.abs(b.vx)>30,air:!b.onGround,throwT:0,hurt:false,blink:(G.t%3.1)<0.1});c.restore();
  if(b.hintT>0&&!G.clear&&!G.vm)bubble(b.x+b.w/2,b.y-charDH(b.k)-4,(Math.floor(G.t*2)%2?'👆 ':'')+'TAP TO SWAP');else if(b.sayT>0&&b.say)bubble(b.x+b.w/2,b.y-charDH(b.k)-4,b.say)}
 function charDH(k){const f=FORMS[(k||'').slice(2)];if(f)return f.dh-sizeFor(k)[1];return k==='chewie'?24:k==='taco'?20:18}
 function swapBuddy(){const b=G&&G.buddy,p=G&&G.p;if(G&&G.vm||!b||!p||p.dead||G.clear||G.mode!=='platform'||state!=='play'||b.cd>0||p.capT)return false;
@@ -773,7 +784,7 @@ function drawPlayer(){const p=G.p;if(p.dead&&G.mode!=='bike'){return}if(p.inv>0&
  if(p.star>0){c.save();c.globalCompositeOperation='lighter';const g=c.createRadialGradient(0,-24,4,0,-24,48);g.addColorStop(0,'hsla('+(G.t*400%360)+',100%,70%,0.6)');g.addColorStop(1,'#0000');c.fillStyle=g;c.fillRect(-50,-80,100,90);c.restore()}
  if(p.shield){c.save();c.globalCompositeOperation='lighter';c.strokeStyle='#7ff7ffaa';c.lineWidth=3;c.beginPath();c.arc(0,-26,34+Math.sin(G.t*8)*2,0,TAU);c.stroke();c.restore()}
  const sq=p.pound===2?1.2:1;c.scale(p.face*sq,1/sq);
- drawHero(c,PC,{t:G.t,run:p.onGround&&Math.abs(p.vx)>30,air:!p.onGround,throwT:p.throwT,hurt:p.inv>1,blink:(G.t%3.5)<0.1});
+ heroGait(p,p.onGround);drawHero(c,PC,{ph:p._gp,amp:p._ga,t:G.t,run:p.onGround&&Math.abs(p.vx)>30,air:!p.onGround,throwT:p.throwT,hurt:p.inv>1,blink:(G.t%3.5)<0.1});
  if(p.iceT>0){c.save();c.globalAlpha=0.55;c.fillStyle='#bff2ff';D.rr(c,-p.w/2-8,-p.h-14,p.w+16,p.h+16,6);c.fill();c.globalAlpha=0.9;c.strokeStyle='#ffffff';c.lineWidth=2;c.stroke();c.restore()}
  c.restore()}
 function drawSarlacc(h){const cx=h.x+h.w/2,y=h.y,t=G.t;const pull=h.pull||0;const im=D.IMG['art/props/sarlacc'];
