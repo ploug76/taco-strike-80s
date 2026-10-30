@@ -603,17 +603,71 @@ const HERO_ART={rainbow:'art/allies/rainbow_brite',carebear:'art/allies/care_bea
 function heroGait(o,ok){const now=performance.now(),dt=o._gt?Math.min(0.1,(now-o._gt)/1000):0;o._gt=now;if(o._gp===undefined){o._gp=0;o._ga=0;o._lx=o.x}
  const d=Math.abs(o.x-o._lx);o._lx=o.x;const mv=ok&&d>0.2&&d<60;o._ga+=((mv?1:0)-o._ga)*Math.min(1,dt*10);if(mv)o._gp+=d/45*Math.PI;else if(o._ga<0.03){o._ga=0;o._gp=Math.round(o._gp/Math.PI)*Math.PI}
  return o}
-const HRIG={'art/allies/rainbow_brite':{cy:146,cx:62,p:[50,80],x:[16,112],A:0.3},'art/allies/she_ra':{cy:158,cx:60,p:[42,80],x:[26,104],A:0.3},
- 'art/allies/chewbacca':{cy:160,cx:70,p:[45,105],x:[0,140],A:0.24},'art/allies/care_bear_tenderheart':{cy:164,cx:54,p:[35,75],x:[0,108],A:0.3}};
-function heroCut(x,im,R,w,h,oy,ph,amp){const k=w/im.width,ov=im.height*0.035,a=amp*R.A*Math.sin(ph),cw=Math.cos(ph),lu=0.03*amp*h;
- const leg=(x0,x1,px,ang,lift)=>{x.save();x.translate(-w/2+px*k,oy+R.cy*k-lift);x.rotate(ang);x.translate(-px*k,-R.cy*k);x.beginPath();x.rect(x0*k,(R.cy-ov)*k,(x1-x0)*k,(im.height-R.cy+ov)*k);x.clip();x.drawImage(im,0,0,w,h);x.restore()};
- leg(R.x[0],R.cx,R.p[0],a,lu*Math.max(0,-cw));leg(R.cx,R.x[1],R.p[1],-a,lu*Math.max(0,cw));
- x.save();x.beginPath();x.rect(-w/2,oy,w,h);x.rect(-w/2+R.x[0]*k,oy+R.cy*k,(R.x[1]-R.x[0])*k,(im.height-R.cy)*k);x.clip('evenodd');x.drawImage(im,-w/2,oy,w,h);x.restore()}
+/* KneeRig (King Juju, Oct 30 2026): jointed limbs for single-pose art.
+   Legs: thigh / shin / foot pieces cut from the art (capsules, image px) re-posed with 2-bone IK, so knees bend. The planted foot
+   moves back at exactly ground speed (no foot slip); the swing foot kicks back, lifts and arcs forward.
+   Cadence (Peter): walk ~1.5-2 steps/s, run ~2.5-3 steps/s; above that the stride gets longer (more air time), never faster legs.
+   Arms: upper arm + forearm pieces, shoulder swings opposite the legs at the same rhythm, elbow bends more on the forward swing.
+   Everything blends back to the art pose in ~150 ms when the character stops.
+   Spec: {S stance sweep px, lift px, kick px (back-kick when running), s0 max stance fraction, vw walk speed / vr run speed (art px/s),
+          bob px, kb knee side (+1/-1 image x; 0 = keep the art's bend),
+          legs:[{h,k,a,f:[x0,y0,x1,y1],rt,rs,rf,o,far,sh,su}], arms:[{s,e,w,ru,rf,fp?:[[x,y]..] forearm+hand polygon,o,far,A,E}]} */
+const KneeRig=(()=>{const C=new WeakMap(),PI=Math.PI,TAU=PI*2,K={clock:()=>performance.now()};
+ function cap(x,a,b,r){const g=Math.atan2(b[1]-a[1],b[0]-a[0]);x.moveTo(a[0]+Math.sin(g)*r,a[1]-Math.cos(g)*r);x.arc(b[0],b[1],r,g-PI/2,g+PI/2);x.arc(a[0],a[1],r,g+PI/2,g+PI*1.5);x.closePath()}
+ function poly(x,p){x.moveTo(p[0][0],p[0][1]);for(const q of p)x.lineTo(q[0],q[1]);x.closePath()}
+ function cv(W,H){const o=document.createElement('canvas');o.width=W;o.height=H;return o}
+ function piece(im,fn){const o=cv(im.width,im.height),x=o.getContext('2d');x.beginPath();fn(x);x.clip();x.drawImage(im,0,0);return o}
+ function dark(src,W,H,clipY,al){const u=cv(W,H),x=u.getContext('2d');x.beginPath();x.rect(0,0,W,clipY);x.clip();x.drawImage(src,0,0);x.globalCompositeOperation='source-atop';x.fillStyle='rgba(40,20,10,'+al+')';x.fillRect(0,0,W,H);return u}
+ const ang=(a,b)=>Math.atan2(b[1]-a[1],b[0]-a[0]),dist=(a,b)=>Math.hypot(b[0]-a[0],b[1]-a[1]);
+ function prep(im,R){let P=C.get(R);if(P&&P.im===im)return P;const W=im.width,H=im.height,body=cv(W,H),bx=body.getContext('2d');bx.drawImage(im,0,0);bx.globalCompositeOperation='destination-out';const U=[];
+  const legs=(R.legs||[]).map(l=>{const f0=[l.f[0],l.f[1]],f1=[l.f[2],l.f[3]],e=l.e!==undefined?l.e:1;
+   const ey=l.v?l.h[1]+(l.v.keep!==undefined?l.v.keep:0.5)*(l.k[1]-l.h[1]):l.h[1]+e;
+   bx.save();bx.beginPath();bx.rect(0,ey,W,H);bx.clip();for(const q of[[l.h,l.k,l.rt],[l.k,l.a,l.rs],[f0,f1,l.rf]]){bx.beginPath();cap(bx,q[0],q[1],q[2]+(R.ep||0.6));bx.fill()}bx.restore();
+   const L1=dist(l.h,l.k),L2=dist(l.k,l.a),t0=ang(l.h,l.k),s0=ang(l.k,l.a),b0=ang(l.h,l.a);let side=Math.atan2(Math.sin(t0-b0),Math.cos(t0-b0));side=Math.abs(side)>0.06?Math.sign(side):0;
+   const ep=R.ep||0.6,th=piece(im,x=>{x.rect(0,l.h[1]-(l.ht!==undefined?l.ht:2),W,H);x.clip();x.beginPath();cap(x,l.h,l.k,l.rt+ep)});
+   if(l.sh!==0&&!l.v)U.push(dark(th,W,H,l.h[1]+(l.k[1]-l.h[1])*(l.su||1),l.sh||0.4));
+   return{l,L1,L2,t0,s0,side,th,sh:piece(im,x=>cap(x,l.k,l.a,l.rs+ep)),ft:piece(im,x=>cap(x,f0,f1,l.rf+ep))}});
+  const arms=(R.arms||[]).map(m=>{const ep=R.ep||0.6,up=piece(im,x=>cap(x,m.s,m.e,m.ru+ep)),fo=piece(im,x=>m.fp?poly(x,m.fp):cap(x,m.e,m.w,m.rf+ep));
+   bx.beginPath();cap(bx,m.s,m.e,m.ru+(R.ep||0.6));bx.fill();bx.beginPath();if(m.fp)poly(bx,m.fp);else cap(bx,m.e,m.w,m.rf+(R.ep||0.6));bx.fill();
+   if(m.sh!==0)U.push(dark(up,W,H,H,m.sh||0.35));if(m.shf)U.push(dark(fo,W,H,H,m.shf));return{m,up,fo}});
+  bx.globalCompositeOperation='destination-over';for(const u of U)bx.drawImage(u,0,0);
+  let cr=0;for(const g of legs){const l=g.l,R2=0.97*(g.L1+g.L2);for(let c=0;c<40;c+=0.25){if(Math.hypot(R.S/2+Math.abs(l.a[0]-l.h[0]),l.a[1]-l.h[1]-c)<=R2){cr=Math.max(cr,c);break}}}
+  P={im,body,legs,arms,cr};C.set(R,P);return P}
+ /* cycles/s for a speed v (art px/s): ~0.85 (1.7 steps/s) walking at vw, ~1.4 (2.8 steps/s) running at vr and above */
+ function cadence(R,v){const vw=R.vw||R.S*2,vr=R.vr||vw*3,r=Math.max(0,Math.min(1,(v-vw)/(vr-vw)));return (R.cw||0.85)+((R.cr||1.4)-(R.cw||0.85))*r}
+ /* advance from world x (k = world px per art px, flip = art drawn mirrored, on = feet on the ground) */
+ function step(o,x,k,flip,R,on){const n=K.clock(),dt=o._kt?Math.min(0.1,(n-o._kt)/1000):0;o._kt=n;o._kk=k;let dx=o._kx===undefined?0:x-o._kx;o._kx=x;
+  if(Math.abs(dx)>120||on===false)dx=0;const di=dx/k*(flip?-1:1),ad=Math.abs(di);if(ad>0.03){o._km=n;o._kd=Math.sign(di)}const mv=on!==false&&o._km&&n-o._km<90;
+  if(dt>0)o._kv=(o._kv||0)+(ad/dt-(o._kv||0))*Math.min(1,dt*6);const v=o._kv||0,D=Math.max(R.S/R.s0,v/cadence(R,v));o._kD=D;o._ku=((o._ku||0)+ad/D)%1;
+  const tg=mv?1:0,a=o._ka||0;o._ka=a+Math.sign(tg-a)*Math.min(Math.abs(tg-a),dt/(R.bl||0.15));return o}
+ function pose(P,R,o){const a0=o._ka||0,A=a0*a0*(3-2*a0),S=R.S,s=Math.min(R.s0,S/(o._kD||S/R.s0)),u=o._ku||0,dir=o._kd||1,run=Math.max(0,Math.min(1,(R.s0-s)/(R.s0*0.7)));
+  const by=A*(P.cr+(R.bob||0)*(0.5+0.5*Math.cos(TAU*u*2))*(1-run*0.5)-run*(R.bob||0)*0.6*Math.max(0,Math.sin(TAU*u*2)));
+  const legs=P.legs.map(g=>{const l=g.l,q=((u+(l.o||0))%1+1)%1;let X,Y=0,sw=0;if(q<s)X=S/2-S*q/s;else{const v=(q-s)/(1-s),e=v*v*(3-2*v);sw=Math.sin(PI*v);
+    X=-S/2+S*e-run*(R.kick||0)*Math.sin(PI*Math.min(1,v*1.6));Y=-(R.lift*(1+run*0.6))*sw}
+   const ax=l.a[0]+dir*X*A,ay=l.a[1]+Y*A,hx=l.h[0],hy=l.h[1]+by;let d=Math.hypot(ax-hx,ay-hy);d=Math.min(Math.max(d,Math.abs(g.L1-g.L2)+0.01),g.L1+g.L2-0.01);
+   const base=Math.atan2(ay-hy,ax-hx),off=Math.acos(Math.max(-1,Math.min(1,(g.L1*g.L1+d*d-g.L2*g.L2)/(2*g.L1*d))));let sd=g.side;
+   if(!sd){const kb=(R.kb||1);sd=Math.cos(base+off)*kb>=Math.cos(base-off)*kb?1:-1}const t=base+sd*off,kx=hx+g.L1*Math.cos(t),ky=hy+g.L1*Math.sin(t),st=Math.atan2(ay-ky,ax-kx);
+   return{g,hx,hy,kx,ky,ax,ay,tr:t-g.t0,sr:st-g.s0,fr:(st-g.s0)*(R.fk!==undefined?R.fk:0.5)*sw*A,stance:q<s}});
+  const arms=P.arms.map(g=>{const m=g.m,w=Math.cos(TAU*(u+(m.o||0))),Am=(m.A||0.3)*(1+run*0.5),Em=(m.E||0.35)*(1+run*0.6);
+   const sa=-dir*Am*w*A,ea=-dir*(Em*(0.5+0.5*w)+run*0.25)*A,ex=m.s[0]+(m.e[0]-m.s[0])*Math.cos(sa)-(m.e[1]-m.s[1])*Math.sin(sa),ey=m.s[1]+by+(m.e[0]-m.s[0])*Math.sin(sa)+(m.e[1]-m.s[1])*Math.cos(sa);
+   return{g,sx:m.s[0],sy:m.s[1]+by,sa,ex,ey,fa:sa+ea}});
+  return{A,by,legs,arms}}
+ function blit(x,img,p0,px,py,r){x.save();x.translate(px,py);if(r)x.rotate(r);x.translate(-p0[0],-p0[1]);x.drawImage(img,0,0);x.restore()}
+ function vleg(x,L){const v=L.g.l.v,ol=v.ol||1.6;x.save();x.lineCap='round';x.lineJoin='round';
+  const seg=(w,c)=>{x.strokeStyle=c;x.lineWidth=w[0];x.beginPath();x.moveTo(L.hx,L.hy);x.lineTo(L.kx,L.ky);x.stroke();x.lineWidth=w[1];x.beginPath();x.moveTo(L.kx,L.ky);x.lineTo(L.ax,L.ay);x.stroke()};
+  seg([v.wt+ol*2,v.ws+ol*2],v.line);seg([v.wt,v.ws],v.col);if(v.hi){x.globalAlpha=0.35;seg([v.wt*0.35,v.ws*0.35],v.hi)}x.restore();blit(x,L.g.ft,L.g.l.a,L.ax,L.ay,L.fr)}
+ function leg(x,L){const l=L.g.l;if(l.v)return vleg(x,L);blit(x,L.g.ft,l.a,L.ax,L.ay,L.fr);blit(x,L.g.sh,l.k,L.kx,L.ky,L.sr);blit(x,L.g.th,l.h,L.hx,L.hy,L.tr)}
+ function arm(x,M){const m=M.g.m;blit(x,M.g.fo,m.e,M.ex,M.ey,M.fa);blit(x,M.g.up,m.s,M.sx,M.sy,M.sa)}
+ /* draw in art space (ctx transformed so 1 unit = 1 art px, art top-left at 0,0) */
+ function draw(x,im,R,o){if(!im||!im.width)return;const a=o&&o._ka||0;if(a<0.002){x.drawImage(im,0,0);return}const P=prep(im,R),Q=pose(P,R,o);o._kf=Q.legs.map(L=>[L.ax,L.ay,L.stance]);
+  for(const M of Q.arms)if(M.g.m.far)arm(x,M);for(const L of Q.legs)if(L.g.l.far)leg(x,L);x.drawImage(P.body,0,Q.by);for(const L of Q.legs)if(!L.g.l.far)leg(x,L);for(const M of Q.arms)if(!M.g.m.far)arm(x,M)}
+ K.step=step;K.draw=draw;K.prep=prep;K.cadence=cadence;return K})();
+const KRIG={"art/allies/she_ra":{"S":30,"lift":8,"kick":8,"s0":0.55,"vw":250,"vr":700,"bob":2.5,"kb":1,"fk":0.4,"legs":[{"h":[57,114],"k":[51,134],"a":[39,180],"f":[33,189,43,193],"rt":10,"rs":9,"rf":7,"o":0.5,"far":1,"sh":0.45,"su":0.45},{"h":[80,114],"k":[82,135],"a":[82,180],"f":[80,188,95,191],"rt":10,"rs":9,"rf":7,"o":0,"sh":0,"su":0.35}]},"art/allies/rainbow_brite":{"S":30,"lift":8,"kick":8,"s0":0.55,"vw":250,"vr":700,"bob":2.5,"kb":1,"fk":0.4,"legs":[{"h":[56,133],"k":[46,151],"a":[37,178],"f":[25,189,42,191],"rt":8,"rs":10,"rf":8,"o":0.5,"far":1,"sh":0.4,"su":0.4},{"h":[72,133],"k":[78,155],"a":[80,180],"f":[78,189,100,190],"rt":8,"rs":10,"rf":8,"o":0,"sh":0.35,"su":0.35}],"arms":[{"s":[52,78],"e":[37,100],"ru":8,"fp":[[24,95],[46,98],[42,116],[34,128],[30,158],[0,166],[0,112],[16,108]],"o":0,"far":1,"A":0.28,"E":0.3,"sh":0.3},{"s":[73,78],"e":[89,96],"ru":8,"fp":[[82,88],[100,82],[104,58],[127,52],[127,92],[112,100],[106,124],[96,124],[86,102]],"o":0.5,"A":0.18,"E":0.2,"sh":0.3}],"ep":1.8},"art/allies/care_bear_tenderheart":{"S":24,"lift":8,"kick":8,"s0":0.55,"vw":220,"vr":650,"bob":2.5,"kb":1,"fk":0.3,"legs":[{"h":[33,156],"k":[31,170],"a":[29,181],"f":[15,188,45,190],"rt":16,"rs":15,"rf":9,"o":0.5,"far":1,"v":{"wt":24,"ws":21,"col":"#9a4e14","line":"#4a1e02","hi":"#c27a3a","keep":0.35}},{"h":[76,158],"k":[80,171],"a":[83,180],"f":[70,184,98,187],"rt":16,"rs":15,"rf":9,"o":0,"v":{"wt":24,"ws":21,"col":"#ad5818","line":"#4a1e02","hi":"#d08848","keep":0.35}}],"arms":[{"s":[23,88],"e":[15,113],"ru":9,"w":[19,138],"rf":10,"o":0,"far":0,"A":0.3,"E":0.35,"sh":0.15,"shf":0.12},{"s":[90,92],"e":[97,115],"ru":8,"w":[97,138],"rf":9,"o":0.5,"far":0,"A":0.3,"E":0.35,"sh":0.15,"shf":0.12}],"ep":1.8},"art/allies/chewbacca":{"S":34,"lift":9,"kick":9,"s0":0.55,"vw":250,"vr":700,"bob":3,"kb":1,"fk":0.35,"legs":[{"h":[55,150],"k":[37,195],"a":[26,224],"f":[10,232,42,232],"rt":15,"rs":14,"rf":9,"o":0.5,"far":1,"sh":0.3},{"h":[100,150],"k":[108,195],"a":[115,222],"f":[100,231,136,232],"rt":15,"rs":14,"rf":9,"o":0,"sh":0.3,"su":0.35}]},"art/allies/wicket":{"S":14,"lift":5,"kick":4,"s0":0.55,"vw":120,"vr":380,"bob":1.5,"kb":1,"fk":0.3,"legs":[{"h":[22,99],"k":[21,107],"a":[20,113],"f":[11,116,30,116],"rt":9,"rs":8,"rf":5,"o":0.5,"far":1,"v":{"wt":13,"ws":11,"col":"#8e4618","line":"#350e04","hi":"#b06a30","keep":0.3}},{"h":[46,99],"k":[47,107],"a":[48,113],"f":[39,116,57,116],"rt":9,"rs":8,"rf":5,"o":0,"v":{"wt":13,"ws":11,"col":"#9a5420","line":"#350e04","hi":"#b06a30","keep":0.3}}]}};
 function drawHero(x,key,a,menu){if(key&&key.startsWith('h:'))return drawForm(x,key,a);
  if(key==='taco'&&D.IMG['art/hero/taco']){const fr=a.hurt?'taco_hurt':a.air?'taco_jump':a.throwT>0?'taco_throw':a.run||a.amp>0.5?(Math.floor((a.ph!==undefined?a.ph/Math.PI:a.t*10))%2?'taco_run1':'taco_run2'):'taco';const im=D.IMG['art/hero/'+fr]||D.IMG['art/hero/taco'];const h=64,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
  const hf=HERO_FRAMES[key];if(hf&&D.IMG[hf]){const fr=a.hurt?'_hurt':a.air?'_jump':a.throwT>0?'_throw':a.run||a.amp>0.5?(Math.floor((a.ph!==undefined?a.ph/Math.PI:a.t*10))%2?'_run1':'_run2'):'';const im=D.IMG[hf+fr]||D.IMG[hf];const h=74,s=h/im.height;x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);return}
- const ak=HERO_ART[key];const im=ak&&D.IMG[ak];if(im){const h=key==='chewie'?84:key==='ewok'?52:72,s=h/im.height;let dy=0,rot=0,sx=1,sy=1;if(key==='ewok'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t,a.run?55:0);dy=g.dy||0;rot=g.rot||0;sx=g.sx||1;sy=g.sy||1}else if(a.ph!==undefined&&HRIG[ak]){dy=-Math.abs(Math.sin(a.ph))*3*a.amp;rot=Math.sin(a.ph)*0.05*a.amp}else if(a.run){dy=-Math.abs(Math.sin(a.t*13))*3;rot=Math.sin(a.t*13)*0.05}
-  x.save();x.translate(0,dy);x.rotate(rot+(a.throwT>0?-0.08:0));x.scale(sx,sy);if(a.ph!==undefined&&HRIG[ak]&&a.amp>0.01&&!a.air)heroCut(x,im,HRIG[ak],im.width*s,h,-h+2,a.ph,a.amp);else x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);x.restore();return}
+ const ak=HERO_ART[key];const im=ak&&D.IMG[ak];if(im){const h=key==='chewie'?84:key==='ewok'?52:72,s=h/im.height;const KR=KRIG[ak];if(KR&&a.o&&!menu){KneeRig.step(a.o,a.o.x,s,!!a.fl,KR,!a.air);if((a.o._ka||0)>0.002){x.save();if(a.throwT>0)x.rotate(-0.08);x.translate(-im.width*s/2,-h+2);x.scale(s,s);KneeRig.draw(x,im,KR,a.o);x.restore();return}}let dy=0,rot=0,sx=1,sy=1;if(key==='ewok'&&window.TacoPhysics){const g=TacoPhysics.ewokBob(a.t,a.run?55:0);dy=g.dy||0;rot=g.rot||0;sx=g.sx||1;sy=g.sy||1}else if(a.run){dy=-Math.abs(Math.sin(a.t*13))*3;rot=Math.sin(a.t*13)*0.05}
+  x.save();x.translate(0,dy);x.rotate(rot+(a.throwT>0?-0.08:0));x.scale(sx,sy);x.drawImage(im,-im.width*s/2,-h+2,im.width*s,h);x.restore();return}
  if(key==='ewok')return D.ewok(x,a,0.85,'#7a5a3a');D.drawChar(x,key,a)}
 function bossFrame(b){const k=b.art0;if(!k)return;const has=f=>D.IMG['art/bosses/'+k+f];let f='';
  if(b.dead)f='_defeat';else if(b.hurtT>0||b.stun>0||b.state==='teeter'||b.state==='blind'||b.state==='dizzy'||b.state==='stuck'||b.state==='floored')f='_hurt';else if(b.atkT>0||b.state==='tell')f='_attack';b.art=has(f)?k+f:has('')?k:null}
@@ -680,7 +734,7 @@ function drawWorld(){const t=G.t,L=G.L,x0=G.cam.x-100,x1=G.cam.x+viewW+100,theme
   if(a.sayT>0)bubble(a.x,a.y-(a.who==='chewbacca'?110:90),a.say)}
  // enemies
  for(const e of G.enemies){if(e.x<x0||e.x>x1)continue;c.save();c.translate(e.x,e.y);if(e.dead&&e.squash){c.scale(1.3,Math.max(0.15,1-(e.dt||0)*4));c.globalAlpha=Math.max(0,1-(e.dt||0)*1.5)}else if(e.dead){c.rotate((e.dt||0)*8);c.globalAlpha=Math.max(0,1-(e.dt||0))}
-  const mv=Math.abs(e.x-(e._lx===undefined?e.x:e._lx));e._lx=e.x;e.wp=(e.wp||0)+mv*0.075;e.mvT=mv>0.05?0.12:Math.max(0,(e.mvT||0)-1/60);if(e.ride){D.speeder(c,t,'scout');}else D.enemy(c,{type:e.type,dir:e.dir,h:e.h,w:e.w,flash:e.flash,wp:e.wp,mv:!e.dead&&e.mvT>0},t+e.x*0.01);c.restore()}
+  const mv=Math.abs(e.x-(e._lx===undefined?e.x:e._lx));e._lx=e.x;e.wp=(e.wp||0)+mv*0.075;e.mvT=mv>0.05?0.12:Math.max(0,(e.mvT||0)-1/60);{const n=performance.now(),dt=e._rt?Math.min(0.1,(n-e._rt)/1000):0,tg=!e.dead&&e.mvT>0?1:0,r=e._ra||0;e._rt=n;e._ra=r+Math.sign(tg-r)*Math.min(Math.abs(tg-r),dt/0.15)}if(e.ride){D.speeder(c,t,'scout');}else D.enemy(c,{type:e.type,dir:e.dir,h:e.h,w:e.w,flash:e.flash,wp:e.wp,mv:!e.dead&&e.mvT>0,ra:(e._ra||0)*(e._ra||0)*(3-2*(e._ra||0))},t+e.x*0.01);c.restore()}
  // boss
  if(G.boss&&!G.boss.vm&&G.theme==='tatooine'&&D.IMG['art/props/sail_barge']){const im=D.IMG['art/props/sail_barge'],k=300/im.height;c.globalAlpha=0.9;c.drawImage(im,G.boss.x-im.width*k*0.3,G.boss.gy-300+20,im.width*k,300);c.globalAlpha=1}
  drawMarks();
@@ -753,7 +807,7 @@ function stepBuddy(dt){const b=G.buddy,p=G.p;if(!b||!p)return;b.t+=dt;if(b.sayT>
  if(b.y>VH+40||Math.abs(dx)>viewW*0.85||b.offT>1.2||(!b.onGround&&b.vy>0&&b.y+b.h>VH-10&&!supportAt(b.x+b.w/2,VH)))buddyWarp(b,p)}
 function drawBuddy(){const b=G.buddy;if(!b)return;c.save();c.translate(b.x+b.w/2,b.y+b.h);if(b.fly){c.globalAlpha=0.85}
  if(b.hintT>0||b.tapFx>0){const pulse=0.5+0.5*Math.sin(G.t*6);c.save();c.globalCompositeOperation='lighter';c.globalAlpha=0.35+pulse*0.35;const g=c.createRadialGradient(0,-b.h*0.6,4,0,-b.h*0.6,b.h);g.addColorStop(0,'#ffffff');g.addColorStop(0.4,'#ff4fd8');g.addColorStop(1,'#0000');c.fillStyle=g;c.fillRect(-b.h,-b.h*1.6,b.h*2,b.h*2);c.restore()}
- heroGait(b,b.onGround);c.scale(b.face,1);drawHero(c,b.k,{ph:b._gp,amp:b._ga,t:G.t+1.3,run:b.onGround&&Math.abs(b.vx)>30,air:!b.onGround,throwT:0,hurt:false,blink:(G.t%3.1)<0.1});c.restore();
+ heroGait(b,b.onGround);c.scale(b.face,1);drawHero(c,b.k,{o:b,fl:b.face<0,ph:b._gp,amp:b._ga,t:G.t+1.3,run:b.onGround&&Math.abs(b.vx)>30,air:!b.onGround,throwT:0,hurt:false,blink:(G.t%3.1)<0.1});c.restore();
  if(b.hintT>0&&!G.clear&&!G.vm)bubble(b.x+b.w/2,b.y-charDH(b.k)-4,(Math.floor(G.t*2)%2?'👆 ':'')+'TAP TO SWAP');else if(b.sayT>0&&b.say)bubble(b.x+b.w/2,b.y-charDH(b.k)-4,b.say)}
 function charDH(k){const f=FORMS[(k||'').slice(2)];if(f)return f.dh-sizeFor(k)[1];return k==='chewie'?24:k==='taco'?20:18}
 function swapBuddy(){const b=G&&G.buddy,p=G&&G.p;if(G&&G.vm||!b||!p||p.dead||G.clear||G.mode!=='platform'||state!=='play'||b.cd>0||p.capT)return false;
@@ -784,7 +838,7 @@ function drawPlayer(){const p=G.p;if(p.dead&&G.mode!=='bike'){return}if(p.inv>0&
  if(p.star>0){c.save();c.globalCompositeOperation='lighter';const g=c.createRadialGradient(0,-24,4,0,-24,48);g.addColorStop(0,'hsla('+(G.t*400%360)+',100%,70%,0.6)');g.addColorStop(1,'#0000');c.fillStyle=g;c.fillRect(-50,-80,100,90);c.restore()}
  if(p.shield){c.save();c.globalCompositeOperation='lighter';c.strokeStyle='#7ff7ffaa';c.lineWidth=3;c.beginPath();c.arc(0,-26,34+Math.sin(G.t*8)*2,0,TAU);c.stroke();c.restore()}
  const sq=p.pound===2?1.2:1;c.scale(p.face*sq,1/sq);
- heroGait(p,p.onGround);drawHero(c,PC,{ph:p._gp,amp:p._ga,t:G.t,run:p.onGround&&Math.abs(p.vx)>30,air:!p.onGround,throwT:p.throwT,hurt:p.inv>1,blink:(G.t%3.5)<0.1});
+ heroGait(p,p.onGround);drawHero(c,PC,{o:p,fl:p.face*sq<0,ph:p._gp,amp:p._ga,t:G.t,run:p.onGround&&Math.abs(p.vx)>30,air:!p.onGround,throwT:p.throwT,hurt:p.inv>1,blink:(G.t%3.5)<0.1});
  if(p.iceT>0){c.save();c.globalAlpha=0.55;c.fillStyle='#bff2ff';D.rr(c,-p.w/2-8,-p.h-14,p.w+16,p.h+16,6);c.fill();c.globalAlpha=0.9;c.strokeStyle='#ffffff';c.lineWidth=2;c.stroke();c.restore()}
  c.restore()}
 function drawSarlacc(h){const cx=h.x+h.w/2,y=h.y,t=G.t;const pull=h.pull||0;const im=D.IMG['art/props/sarlacc'];

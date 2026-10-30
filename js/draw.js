@@ -270,7 +270,7 @@ function rigBlit(c,img,dx,dw,dh,hipF,ang,bob){const iw=img.width,ih=img.height,X
  for(const side of[0,1]){c.save();c.translate(0,hipY);c.rotate(side?-ang:ang);c.beginPath();c.rect(side?X0+dw/2:X0-dw,-4,dw*1.5,lh+12);c.clip();c.drawImage(img,0,ih*hipF,iw,ih*(1-hipF),X0,0,dw,lh);c.restore()}
  const ov=0.05;c.drawImage(img,0,0,iw,ih*(hipF+ov),X0,-dh+bob,dw,dh*(hipF+ov))}
 D.enemy=function(c,e,t){const im=IMG['art/enemies/'+e.type];if(im){const h=e.h*1.25,s=h/im.height;c.save();c.scale(e.dir>0?-1:1,1);
-  const hf=RIG[e.type];if(hf){const ph=e.wp||0,ang=e.mv?Math.sin(ph)*0.32:0,bob=e.mv?-Math.abs(Math.cos(ph))*2.5:0;const rim=BAKED_RIM.has(e.type)?null:D.rimOf(im,RIMCOL[e.type]||'#ffffff'),k=h/im.height,pad=rim?6*k:0,w=im.width*k;
+  const hf=RIG[e.type];if(hf){const ph=e.wp||0,ra=e.ra!==undefined?e.ra:(e.mv?1:0),ang=Math.sin(ph)*0.32*ra,bob=-Math.abs(Math.cos(ph))*2.5*ra;const rim=BAKED_RIM.has(e.type)?null:D.rimOf(im,RIMCOL[e.type]||'#ffffff'),k=h/im.height,pad=rim?6*k:0,w=im.width*k;
    if(rim){c.save();c.translate(0,pad);rigBlit(c,rim,-w/2-pad,w+pad*2,h+pad*2,(6+im.height*hf)/(im.height+12),ang,bob);c.restore()}else rigBlit(c,im,-w/2,w,h,hf,ang,bob);
    if(e.flash>0){c.save();c.globalAlpha=Math.min(1,e.flash*6)*0.85;rigBlit(c,D.whiteOf(im),-w/2,w,h,hf,ang,bob);c.restore()}c.restore();return}
   D.sprite(c,im,-im.width*s/2,-h,im.width*s,h,{rim:BAKED_RIM.has(e.type)?null:RIMCOL[e.type]||'#ffffff',flash:e.flash});c.restore();return}
