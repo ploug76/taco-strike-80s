@@ -24,10 +24,19 @@ const CHARS={
 function resize(){W=innerWidth;H=innerHeight;DPR=Math.min(devicePixelRatio||1,2);cv.width=Math.round(W*DPR);cv.height=Math.round(H*DPR);portrait=H>W*1.1;
  if(portrait){VV=540;S=W/clamp(W*1.05,400,470);gameH=VV*S;if(gameH>H*0.62){S=H*0.62/VV;gameH=VV*S}gameTop=Math.round(clamp((H-gameH)*0.25,40,150))}else{VV=clamp(Math.round(540*Math.min(1,(W/H)/2.6)),440,540);S=H/VV;gameH=H;gameTop=0}
  viewW=W/S;layoutPad()}
-function layoutPad(){const pad=$('pad'),bj=$('bJump'),bt=$('bThrow'),hint=$('swipeHint');
- if(portrait){const top=gameTop+gameH,ph=H-top;pad.style.top=top+'px';pad.style.height=ph+'px';const sz=Math.round(clamp(ph*0.36,84,120));[bj,bt].forEach(b=>{b.style.width=b.style.height=sz+'px'});
-  /* Oct 30: JUMP bottom-right; THROW bottom-left, SPECIAL beside it */[bj,bt,$('bSpec')].forEach(b=>{if(b){b.style.left='';b.style.right=''}});bj.style.right='18px';bj.style.bottom=Math.round(ph*0.22)+'px';bt.style.left='18px';bt.style.bottom=Math.round(ph*0.22)+'px';hint.style.top='14px';hint.style.display='';const bs=$('bSpec');if(bs){const z=Math.round(sz*0.78);bs.style.width=bs.style.height=z+'px';bs.style.left=(18+sz+16)+'px';bs.style.bottom=Math.round(ph*0.22+sz*0.1)+'px'}}
- else{pad.style.top='auto';pad.style.height='0';const sz=Math.round(clamp(H*0.2,70,92));[bj,bt].forEach(b=>{b.style.width=b.style.height=sz+'px'});[bj,bt,$('bSpec')].forEach(b=>{if(b){b.style.left='';b.style.right=''}});bj.style.right='10px';bj.style.bottom='12px';bt.style.left='10px';bt.style.bottom='12px';hint.style.display='none';const bs=$('bSpec');if(bs){const z=Math.round(sz*0.8);bs.style.width=bs.style.height=z+'px';bs.style.left=(10+sz+14)+'px';bs.style.bottom='12px'}}}
+function layoutPad(){const pad=$('pad'),bj=$('bJump'),bt=$('bThrow'),hint=$('swipeHint'),bs=$('bSpec');
+ /* Peter Oct 30 9:40 PM: cluster like his screenshot - JUMP big orange far bottom-right, THROW smaller green up-left of it, SPECIAL above THROW */
+ [bj,bt,bs].forEach(b=>{if(b){b.style.left='';b.style.right=''}});
+ if(portrait){const top=gameTop+gameH,ph=H-top;pad.style.top=top+'px';pad.style.height=ph+'px';
+  const big=Math.round(clamp(ph*0.36,92,124)),sm=Math.round(big*0.84),bot=Math.round(clamp(ph*0.14,18,46));
+  bj.style.width=bj.style.height=big+'px';bt.style.width=bt.style.height=sm+'px';
+  bj.style.right='16px';bj.style.bottom=bot+'px';bt.style.right=(16+big+14)+'px';let tb=bot+big*0.42;if(tb+sm>ph-8)tb=ph-sm-8;bt.style.bottom=Math.round(tb)+'px';
+  hint.style.top='14px';hint.style.display='';
+  if(bs){const z=Math.round(sm*0.72);bs.style.width=bs.style.height=z+'px';bs.style.right=(16+big+14+sm+12)+'px';bs.style.bottom=Math.round(tb+(sm-z)/2)+'px'}}
+ else{pad.style.top='auto';pad.style.height='0';const big=Math.round(clamp(H*0.21,72,96)),sm=Math.round(big*0.82);
+  bj.style.width=bj.style.height=big+'px';bt.style.width=bt.style.height=sm+'px';
+  bj.style.right='14px';bj.style.bottom='12px';bt.style.right=(14+big+10)+'px';bt.style.bottom=Math.round(12+big*0.18)+'px';hint.style.display='none';
+  if(bs){const z=Math.round(sm*0.72);bs.style.width=bs.style.height=z+'px';bs.style.right=Math.round(14+big+10+(sm-z)/2)+'px';bs.style.bottom=Math.round(12+big*0.18+sm+10)+'px'}}}
 addEventListener('resize',resize);resize();
 /* ---------------- audio ---------------- */
 const AU={ctx:null,master:null,music:null,sfx:null,muted:!!save.muted,cur:null,timer:null,
